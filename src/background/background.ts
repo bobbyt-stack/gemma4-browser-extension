@@ -1,8 +1,18 @@
-import { pipeline } from "@huggingface/transformers";
+import {
+  AutoModelForCausalLM,
+  AutoTokenizer,
+  type FeatureExtractionPipeline,
+  Message,
+  PreTrainedModel,
+  PreTrainedTokenizer,
+  TextStreamer,
+  pipeline,
+} from "@huggingface/transformers";
 
 import {
   BackgroundMessages,
   BackgroundTasks,
+  MODELS,
   ResponseStatus,
 } from "../shared/types.ts";
 import { calculateDownloadProgress } from "./utils/calculateDownloadProgress.ts";
@@ -10,7 +20,9 @@ import { calculateDownloadProgress } from "./utils/calculateDownloadProgress.ts"
 console.log("AgentGemma Extension: Background service worker loaded");
 
 let isBackgroundActive = false;
-let featureExtractionPipeline: any = null;
+let featureExtractionPipeline: FeatureExtractionPipeline = null;
+let llm: { tokenizer: PreTrainedTokenizer; model: PreTrainedModel } = null;
+let pastKeyValues = null;
 
 const onModelDownloadProgress = (modelId: string, percentage: number) => {
   console.log(modelId, percentage);
@@ -21,25 +33,51 @@ const onModelDownloadProgress = (modelId: string, percentage: number) => {
   });
 };
 
-const getFeatureExtractionPipeline = async () => {
-  if (featureExtractionPipeline) return featureExtractionPipeline;
+const getFeatureExtractionPipeline =
+  async (): Promise<FeatureExtractionPipeline> => {
+    if (featureExtractionPipeline) return featureExtractionPipeline;
+
+    try {
+      const pipe = await pipeline(
+        "feature-extraction",
+        MODELS.allMiniLM.modelId,
+        {
+          dtype: MODELS.allMiniLM.dtype,
+          device: "webgpu",
+          progress_callback: calculateDownloadProgress(({ percentage }) =>
+            onModelDownloadProgress(MODELS.allMiniLM.modelId, percentage)
+          ),
+        }
+      );
+      featureExtractionPipeline = pipe as FeatureExtractionPipeline;
+      return featureExtractionPipeline;
+    } catch (error) {
+      console.error("Failed to initialize feature extraction pipeline:", error);
+      throw error;
+    }
+  };
+
+const getTextGenerationPipeline = async () => {
+  if (llm) return llm;
 
   try {
-    const pipe = await pipeline(
-      "feature-extraction",
-      "onnx-community/all-MiniLM-L6-v2-ONNX",
-      {
-        device: "webgpu",
-        progress_callback: calculateDownloadProgress(({ percentage }) =>
-          onModelDownloadProgress(
-            "onnx-community/all-MiniLM-L6-v2-ONNX",
-            percentage
-          )
-        ),
-      }
-    );
-    featureExtractionPipeline = pipe;
-    return featureExtractionPipeline;
+    const m = MODELS.granite3B;
+
+    const tokenizer = await AutoTokenizer.from_pretrained(m.modelId, {
+      progress_callback: calculateDownloadProgress(({ percentage }) =>
+        onModelDownloadProgress(m.modelId, percentage)
+      ),
+    });
+
+    const model = await AutoModelForCausalLM.from_pretrained(m.modelId, {
+      dtype: m.dtype,
+      device: "webgpu",
+      progress_callback: calculateDownloadProgress(({ percentage }) =>
+        onModelDownloadProgress(m.modelId, percentage)
+      ),
+    });
+    llm = { tokenizer, model };
+    return llm;
   } catch (error) {
     console.error("Failed to initialize feature extraction pipeline:", error);
     throw error;
@@ -63,17 +101,30 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     console.log(
       `Extension ${isBackgroundActive ? "activated" : "deactivated"}`
     );
-    sendResponse({ success: true });
+    sendResponse({ status: ResponseStatus.SUCCESS });
   }
 
   if (message.type === BackgroundTasks.INITIALIZE_MODELS) {
-    getFeatureExtractionPipeline()
+    Promise.all([getFeatureExtractionPipeline(), getTextGenerationPipeline()])
       .then(() => {
-        sendResponse({ success: true });
+        sendResponse({ status: ResponseStatus.SUCCESS });
       })
       .catch((error) => {
         console.error("INITIALIZE_MODELS failed:", error);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
+      });
+
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.type === BackgroundTasks.GENERATE_TEXT) {
+    generateText(message.messages, console.log)
+      .then((result) => {
+        sendResponse({ status: ResponseStatus.SUCCESS, result });
+      })
+      .catch((error) => {
+        console.error("GENERATE_TEXT failed:", error);
+        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
 
     return true; // Keep message channel open for async response
@@ -82,11 +133,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === BackgroundTasks.EXTRACT_FEATURES) {
     extractFeatures(message.text)
       .then((result) => {
-        sendResponse({ status: ResponseStatus.ERROR, result });
+        sendResponse({ status: ResponseStatus.SUCCESS, result });
       })
       .catch((error) => {
         console.error("EXTRACT_FEATURES failed:", error);
-        sendResponse({ status: "Task failed", error: error.message });
+        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
 
     return true; // Keep message channel open for async response
@@ -99,6 +150,48 @@ const extractFeatures = async (text: string): Promise<number[]> => {
   const pipe = await getFeatureExtractionPipeline();
   const result = await pipe(text, { normalize: true, pooling: "mean" });
   return result.tolist();
+};
+
+const generateText = async (
+  messages: Array<Message>,
+  onToken: (token: string) => void
+): Promise<string> => {
+  const { tokenizer, model } = await getTextGenerationPipeline();
+
+  console.log(messages);
+
+  const input = tokenizer.apply_chat_template(messages, {
+    //tools,
+    add_generation_prompt: true,
+    return_dict: true,
+  });
+
+  const streamer = new TextStreamer(tokenizer, {
+    skip_prompt: true,
+    skip_special_tokens: false,
+    callback_function: (token: string) => {
+      onToken(token);
+    },
+  });
+
+  // Generate the response
+  const { sequences, past_key_values } = await model.generate({
+    ...input,
+    past_key_values: pastKeyValues,
+    max_new_tokens: 512,
+    do_sample: false,
+    streamer,
+    return_dict_in_generate: true,
+  });
+  pastKeyValues = past_key_values;
+
+  const response = tokenizer
+    .batch_decode(sequences.slice(null, [input.input_ids.dims[1], null]), {
+      skip_special_tokens: false,
+    })[0]
+    .replace(/<\|end_of_text\|>$/, "");
+
+  return response;
 };
 
 chrome.runtime.onInstalled.addListener(() => {

@@ -2,6 +2,11 @@ import { Message } from "@huggingface/transformers";
 import { useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 
+import {
+  BackgroundTasks,
+  REQUIRED_MODEL_IDS,
+  STORAGE_KEYS,
+} from "../../shared/types.ts";
 import { Button, InputText, MessageContent } from "../theme";
 import cn from "../utils/classnames.ts";
 
@@ -23,17 +28,30 @@ export default function Chat({ className = "" }: { className?: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
 
   const onSubmit = (data: FormParams) => {
-    setMessages((prev) => [
-      ...prev,
+    const newMessages = [
+      ...messages,
       {
         role: "user",
         content: data.input,
       },
+    ];
+    setMessages(newMessages);
+
+    chrome.runtime.sendMessage(
       {
-        role: "assistant",
-        content: "Processing...",
+        type: BackgroundTasks.GENERATE_TEXT,
+        messages: [
+          { role: "system", content: "You are a helpful assistant." },
+          ...newMessages,
+        ],
       },
-    ]);
+      (response) => {
+        setMessages((prev) => [
+          ...prev,
+          { role: "assistant", content: response.result },
+        ]);
+      }
+    );
   };
 
   return (

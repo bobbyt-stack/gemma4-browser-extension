@@ -93,7 +93,7 @@ export default function App() {
         )}
         )
       </Button>
-      <div className="max-w-4/5 w-full">
+      <div className="max-w-4/5 w-full flex flex-col gap-2">
         {Object.entries(downloadingModels).map(([id, progress]) => (
           <Slider text={`${id} (${progress})%`} width={progress} />
         ))}
