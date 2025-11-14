@@ -4,7 +4,9 @@ import {
   ResponseStatus,
 } from "../shared/types.ts";
 import Agent from "./agent/Agent.ts";
+import { getOpenTabsTool, goToTabTool } from "./tools/openTabs.ts";
 import FeatureExtractor from "./utils/FeatureExtractor.ts";
+
 
 const onModelDownloadProgress = (modelId: string, percentage: number) =>
   chrome.runtime.sendMessage({
@@ -15,6 +17,9 @@ const onModelDownloadProgress = (modelId: string, percentage: number) =>
 
 const agent = new Agent();
 const featureExtractor = new FeatureExtractor();
+
+agent.setTool(getOpenTabsTool);
+agent.setTool(goToTabTool);
 
 agent.onChatMessageUpdate((messages) =>
   chrome.runtime.sendMessage({

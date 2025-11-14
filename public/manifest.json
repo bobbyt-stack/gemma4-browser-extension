@@ -3,7 +3,7 @@
   "name": "Transformer.js AgentGemma Extension",
   "version": "0.0.1",
   "description": "Chrome extension with transformers.js ML capabilities",
-  "permissions": ["sidePanel", "activeTab", "storage"],
+  "permissions": ["sidePanel", "activeTab", "storage", "scripting"],
   "host_permissions": ["<all_urls>"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

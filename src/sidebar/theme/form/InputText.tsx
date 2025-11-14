@@ -22,6 +22,7 @@ interface InputTextProps {
   min?: number;
   max?: number;
   step?: number;
+  onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
 }
 
 const InputText = forwardRef<HTMLInputElement, InputTextProps>(
@@ -60,7 +61,9 @@ const InputText = forwardRef<HTMLInputElement, InputTextProps>(
           )}
         >
           {label}
-          {required && <span className="ml-1 text-chrome-accent-primary">*</span>}
+          {required && (
+            <span className="ml-1 text-chrome-accent-primary">*</span>
+          )}
           {tooltip !== "" && (
             <LabelTooltip
               text={<>{tooltip}</>}

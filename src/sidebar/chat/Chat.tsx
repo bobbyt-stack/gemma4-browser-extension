@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 
 import {
@@ -9,6 +9,7 @@ import {
 } from "../../shared/types.ts";
 import { Button, InputText } from "../theme";
 import cn from "../utils/classnames.ts";
+import ChatCommands, { ChatCommandsRef, Command } from "./ChatCommands.tsx";
 import MessageContent from "./MessageContent.tsx";
 
 interface FormParams {
@@ -17,19 +18,49 @@ interface FormParams {
 
 export default function Chat() {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const commandsRef = useRef<ChatCommandsRef>(null);
   const {
     control,
     formState: { errors },
     handleSubmit,
     reset,
+    setValue,
+    watch,
   } = useForm<FormParams>({
     defaultValues: {
-      input:
-        "Whats the best transport method for today based in the weather in London?",
+      input: "",
     },
   });
   const [messages, setMessages] = useState<Array<ChatMessage>>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [showCommands, setShowCommands] = useState<boolean>(false);
+
+  const inputValue = watch("input");
+
+  const commands: Command[] = [
+    {
+      name: "/clear",
+      description: "Clear all messages",
+      action: () => {
+        chrome.runtime.sendMessage({
+          type: BackgroundTasks.AGENT_CLEAR,
+        });
+        setMessages([]);
+        setValue("input", "");
+        setShowCommands(false);
+      },
+    },
+  ];
+
+  // Show/hide command palette based on input
+  useEffect(() => {
+    if (inputValue.startsWith("/")) {
+      setShowCommands(true);
+    } else {
+      setShowCommands(false);
+    }
+  }, [inputValue]);
 
   useEffect(() => {
     chrome.runtime.sendMessage(
@@ -41,6 +72,10 @@ export default function Chat() {
       }
     );
 
+    chrome.runtime.sendMessage({
+      type: BackgroundTasks.AGENT_CLEAR,
+    });
+
     chrome.runtime.onMessage.addListener((message) => {
       if (message.type === BackgroundMessages.MESSAGES_UPDATE) {
         setMessages(message.messages);
@@ -48,9 +83,16 @@ export default function Chat() {
     });
   }, []);
 
+  // Forward keyboard events to ChatCommands
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    commandsRef.current?.handleKeyDown(e);
+  };
+
   const onSubmit = (data: FormParams) => {
     setIsLoading(true);
     reset();
+
+    inputRef.current?.focus();
 
     chrome.runtime.sendMessage(
       {
@@ -89,9 +131,6 @@ export default function Chat() {
                   : "bg-chrome-bg-secondary"
               )}
             >
-              {/*<div className="mb-1 text-xs font-medium opacity-70">
-                {message.role === "user" ? "You" : message.role}
-              </div>*/}
               <div className="text-sm">
                 {message.role === "user" ? (
                   message.content
@@ -107,8 +146,15 @@ export default function Chat() {
         )}
       </div>
 
-      {/* Input Area */}
-      <div className="border-t border-chrome-border px-6 py-4 bg-chrome-bg-secondary">
+      <div className="border-t border-chrome-border px-6 py-4 bg-chrome-bg-secondary relative">
+        <ChatCommands
+          ref={commandsRef}
+          commands={commands}
+          inputValue={inputValue}
+          isOpen={showCommands}
+          onClose={() => setShowCommands(false)}
+          onExecute={() => setShowCommands(false)}
+        />
         <form onSubmit={handleSubmit(onSubmit)} className="flex gap-3">
           <Controller
             name="input"
@@ -119,18 +165,23 @@ export default function Chat() {
                 {...field}
                 id="chat-input"
                 label="Message"
-                placeholder="Type your message..."
-                disabled={isLoading}
+                placeholder="Type your message or / for commands..."
+                //disabled={isLoading}
                 error={errors.input?.message}
                 hideLabel
                 className="flex-1"
+                onKeyDown={handleKeyDown}
+                ref={(e) => {
+                  field.ref(e);
+                  (inputRef as any).current = e;
+                }}
               />
             )}
           />
 
           <Button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || showCommands}
             color="primary"
             variant="solid"
           >

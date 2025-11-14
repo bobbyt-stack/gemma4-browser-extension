@@ -60,7 +60,7 @@ export const validateWebMCPToolArguments = (
     );
 
     if (missingArguments.length) {
-      throw new Error(
+      console.error(
         `Missing required arguments: ${missingArguments.join(", ")}`
       );
     }

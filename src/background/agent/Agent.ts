@@ -23,7 +23,7 @@ interface Pipeline {
   model: PreTrainedModel;
 }
 
-const weatherTool: WebMCPTool = {
+/*const weatherTool: WebMCPTool = {
   name: "get_weather",
   description: "Get the weather for a given location",
   inputSchema: {
@@ -61,7 +61,7 @@ const transportationTool: WebMCPTool = {
   },
 };
 
-const tools: Array<WebMCPTool> = [weatherTool, transportationTool];
+const tools: Array<WebMCPTool> = [weatherTool, transportationTool];*/
 
 let pipeline: Pipeline = null;
 const getTextGenerationPipeline = async (
@@ -106,6 +106,7 @@ class Agent {
   private chatMessagesListener: Array<
     (chatMessages: Array<ChatMessage>) => void
   > = [];
+  private tools: Array<WebMCPTool> = [];
 
   constructor() {}
 
@@ -122,6 +123,10 @@ class Agent {
     this.chatMessagesListener.push(callback);
   }
 
+  public setTool = (tool: WebMCPTool) => {
+    this.tools = [...this.tools, tool];
+  };
+
   public getTextGenerationPipeline = getTextGenerationPipeline;
 
   public generateText = async (
@@ -133,7 +138,7 @@ class Agent {
     const { tokenizer, model } = await this.getTextGenerationPipeline();
 
     const input = tokenizer.apply_chat_template(this.messages, {
-      tools: tools.map(webMCPToolToChatTemplateTool),
+      tools: this.tools.map(webMCPToolToChatTemplateTool),
       add_generation_prompt: true,
       return_dict: true,
     }) as Object;
@@ -258,7 +263,7 @@ class Agent {
   private executeToolCall = async (
     toolCall: ToolCallPayload
   ): Promise<{ id: string; result: string }> => {
-    const toolToUse = tools.find((t) => t.name === toolCall.name);
+    const toolToUse = this.tools.find((t) => t.name === toolCall.name);
     if (!toolToUse)
       throw new Error(`Tool '${toolCall.name}' not found or is disabled.`);
 
