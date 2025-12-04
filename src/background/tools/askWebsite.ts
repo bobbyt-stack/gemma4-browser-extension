@@ -6,9 +6,61 @@ class WebsiteContentManager {
   private currentPageParts: WebsitePart[] = [];
   private featureExtractor: FeatureExtractor;
   private loadingPromise: Promise<void> | null = null;
+  private currentTabId: number | null = null;
+  private currentUrl: string | null = null;
 
   constructor(featureExtractor: FeatureExtractor) {
     this.featureExtractor = featureExtractor;
+    this.setupListeners();
+    this.initializeCurrentTab();
+  }
+
+  private async initializeCurrentTab(): Promise<void> {
+    try {
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (tab?.id && tab.url?.startsWith("http")) {
+        this.loadPageForTab(tab.id, tab.url);
+      }
+    } catch (error) {
+      console.error("Failed to initialize current tab:", error);
+    }
+  }
+
+  private setupListeners(): void {
+    chrome.tabs.onActivated.addListener(async (activeInfo) => {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (tab.url?.startsWith("http")) {
+        this.loadPageForTab(activeInfo.tabId, tab.url);
+      }
+    });
+
+    chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+      if (changeInfo.status === "complete" && tab.url?.startsWith("http")) {
+        const [activeTab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        if (activeTab?.id === tabId) {
+          this.loadPageForTab(tabId, tab.url);
+        }
+      }
+    });
+  }
+
+  private async loadPageForTab(tabId: number, url: string): Promise<void> {
+    if (this.currentTabId === tabId && this.currentUrl === url) {
+      return;
+    }
+
+    this.currentTabId = tabId;
+    this.currentUrl = url;
+
+    this.loadCurrentPage().catch((error) => {
+      console.error("Failed to load page content:", error);
+    });
   }
 
   async loadCurrentPage(): Promise<void> {
@@ -26,18 +78,22 @@ class WebsiteContentManager {
   }
 
   private async _loadCurrentPageInternal(): Promise<void> {
-    const [tab] = await chrome.tabs.query({
-      active: true,
-      currentWindow: true,
-    });
+    let tabId = this.currentTabId;
 
-    if (!tab.id) {
-      throw new Error("No active tab found");
+    if (!tabId) {
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (!tab?.id) {
+        throw new Error("No active tab found");
+      }
+      tabId = tab.id;
     }
 
     await new Promise((resolve) => setTimeout(resolve, 500));
 
-    const response = await chrome.tabs.sendMessage(tab.id, {
+    const response = await chrome.tabs.sendMessage(tabId, {
       type: ContentTasks.EXTRACT_PAGE_DATA,
     });
 
@@ -75,6 +131,10 @@ class WebsiteContentManager {
   async search(query: string, topK: number = 3): Promise<WebsitePart[]> {
     if (this.currentPageParts.length === 0) {
       await this.loadCurrentPage();
+    }
+
+    if (this.currentPageParts.length === 0) {
+      throw new Error("No content available on the current page");
     }
 
     const queryEmbedding = await this.featureExtractor.extractFeatures([query]);
