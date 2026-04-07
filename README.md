@@ -1,4 +1,4 @@
-# Transformer.js/FunctionGemma AI Agent Extension
+# Transformer.js/Gemma4 AI Agent Extension
 
 ## About this extension
 
@@ -44,7 +44,7 @@ The extension maintains a semantic search-enabled history database:
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd functiongemma-extension
+cd tfjs-agentgemma-extension
 ```
 
 2. Install dependencies:
@@ -89,9 +89,12 @@ The extension requires these permissions:
 - `host_permissions`: Access webpage content on all URLs
 
 ---
-## FunctionGemma 270m IT
+## Gemma 4
 
-TBD
+This extension uses the `onnx-community/gemma-4-E2B-it-ONNX` instruction-tuned model from Hugging Face:
+
+- Model card: https://huggingface.co/onnx-community/gemma-4-E2B-it-ONNX
+- Format: ONNX (optimized for browser inference with Transformers.js + WebGPU)
 
 ---
 ## Extension Architecture
