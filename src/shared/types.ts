@@ -6,6 +6,7 @@ export enum ResponseStatus {
 
 export enum BackgroundTasks {
   EXTRACT_FEATURES,
+  CHECK_MODELS,
   INITIALIZE_MODELS,
   AGENT_INITIALIZE,
   AGENT_GENERATE_TEXT,
@@ -14,6 +15,7 @@ export enum BackgroundTasks {
 }
 
 export enum BackgroundMessages {
+  MODEL_CHECK,
   DOWNLOAD_PROGRESS,
   MESSAGES_UPDATE,
 }
@@ -38,10 +40,22 @@ export interface ChatMessageTool {
   result: string;
 }
 
+export interface AgentMetrics {
+  generatedTokens: number;
+  prefillTokens: number;
+  prefillMs: number;
+  prefillTokensPerSecond: number;
+  decodeMs: number;
+  totalMs: number;
+  tokensPerSecond: number;
+  msPerToken: number;
+}
+
 export interface ChatMessageAssistant {
   role: "assistant";
   content: string;
   tools: Array<ChatMessageTool>;
+  metrics: AgentMetrics;
 }
 
 export type ChatMessage = ChatMessageUser | ChatMessageAssistant;

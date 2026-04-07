@@ -1,7 +1,6 @@
 import { FeatureExtractionPipeline, pipeline } from "@huggingface/transformers";
 
 import { MODELS } from "../../shared/constants.ts";
-import { calculateDownloadProgress } from "./calculateDownloadProgress.ts";
 
 class FeatureExtractor {
   private pipeline: FeatureExtractionPipeline = null;
@@ -18,9 +17,11 @@ class FeatureExtractor {
         {
           dtype: MODELS.allMiniLM.dtype,
           device: "webgpu",
-          progress_callback: calculateDownloadProgress(({ percentage }) =>
-            onDownloadProgress(MODELS.allMiniLM.modelId, percentage)
-          ),
+          progress_callback: (i) => {
+            if (i.status === "progress_total") {
+              onDownloadProgress(MODELS.allMiniLM.modelId, i.progress);
+            }
+          },
         }
       );
       this.pipeline = pipe as FeatureExtractionPipeline;

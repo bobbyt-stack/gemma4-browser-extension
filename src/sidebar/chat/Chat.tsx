@@ -170,6 +170,7 @@ export default function Chat() {
                   <MessageContent
                     content={message.content}
                     tools={message.tools}
+                    metrics={message.metrics}
                   />
                 )}
               </div>

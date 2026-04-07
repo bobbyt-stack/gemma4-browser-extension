@@ -3,8 +3,9 @@ import { ToolCallPayload } from "./types.ts";
 export const extractToolCalls = (
   text: string
 ): { toolCalls: ToolCallPayload[]; message: string } => {
+  const cleanedText = text.replace(/<\|end_of_text\|>/g, "");
   const matches = Array.from(
-    text.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g)
+    cleanedText.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g)
   );
   const toolCalls: ToolCallPayload[] = [];
 
@@ -30,6 +31,7 @@ export const extractToolCalls = (
   // Complete: <tool_call>...</tool_call>
   // Incomplete: <tool_call>... (no closing tag yet)
   const message = text
+    .replace(/<\|end_of_text\|>/g, "")
     .replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g, "")
     .trim();
 

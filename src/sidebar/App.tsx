@@ -1,24 +1,34 @@
 import { useEffect, useState } from "react";
 
 import {
-  MODELS,
-  REQUIRED_MODEL_IDS,
-  STORAGE_KEYS,
-} from "../shared/constants.ts";
-import { BackgroundMessages, BackgroundTasks } from "../shared/types.ts";
+  BackgroundMessages,
+  BackgroundTasks,
+  ResponseStatus,
+} from "../shared/types.ts";
 import Chat from "./chat/Chat.tsx";
 import SettingsHeader from "./components/SettingsHeader.tsx";
-import { Button, Slider } from "./theme";
+import { Button, Loader, Message, Slider } from "./theme";
 import { formatBytes } from "./utils/format.ts";
 
+enum AppStatus {
+  IDLE,
+  CHECKING,
+  NEEDS_DOWNLOAD,
+  DOWNLOADING,
+  READY,
+  ERROR,
+}
+
 export default function App() {
-  const [downloadedModels, setDownloadedModels] = useState<Array<string>>([]);
+  const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
+  const [error, setError] = useState<string | null>(null);
+  const [modelSize, setModelSize] = useState<number>(0);
   const [downloadingModels, setDownloadingModels] = useState<
     Record<string, number>
   >({});
-  const [initialDownload, setInitialDownload] = useState<boolean>(false);
 
   useEffect(() => {
+    setStatus(AppStatus.CHECKING);
     const messageListener = (message: any) => {
       if (message.type === BackgroundMessages.DOWNLOAD_PROGRESS) {
         setDownloadingModels((prev) => ({
@@ -29,21 +39,62 @@ export default function App() {
     };
 
     chrome.runtime.onMessage.addListener(messageListener);
-
-    chrome.storage.local.get([STORAGE_KEYS.DOWNLOADED_MODELS], (result) => {
-      setDownloadedModels(result.downloadedModels || []);
-    });
+    chrome.runtime.sendMessage(
+      { type: BackgroundTasks.CHECK_MODELS },
+      (
+        e:
+          | {
+              results: Array<{
+                size: number;
+                cached: boolean;
+                modelId: string;
+              }>;
+              status: ResponseStatus.SUCCESS;
+            }
+          | {
+              error: string;
+              status: ResponseStatus.ERROR;
+            }
+      ) => {
+        if (e.status === ResponseStatus.SUCCESS) {
+          setModelSize(e.results.reduce((acc, model) => acc + model.size, 0));
+          if (Boolean(e.results.find((r) => !r.cached))) {
+            setStatus(AppStatus.NEEDS_DOWNLOAD);
+          } else {
+            setStatus(AppStatus.READY);
+          }
+        }
+        if (e.status === ResponseStatus.ERROR) {
+          setError(e.error);
+          setStatus(AppStatus.ERROR);
+        }
+      }
+    );
 
     return () => {
       chrome.runtime.onMessage.removeListener(messageListener);
     };
   }, []);
 
-  const needsDownload =
-    REQUIRED_MODEL_IDS.filter((id) => !downloadedModels.includes(id)).length !==
-    0;
+  if (status === AppStatus.ERROR) {
+    return (
+      <div className="flex items-center justify-center h-full w-full flex-col gap-8 px-6">
+        <Message type="error" title="Setup error">
+          {error}
+        </Message>
+      </div>
+    );
+  }
 
-  if (needsDownload) {
+  if (status === AppStatus.IDLE || status === AppStatus.CHECKING) {
+    return (
+      <div className="flex items-center justify-center h-full w-full flex-col gap-8 px-6">
+        <Loader />
+      </div>
+    );
+  }
+
+  if (status === AppStatus.NEEDS_DOWNLOAD || status === AppStatus.DOWNLOADING) {
     return (
       <div className="flex items-center justify-center h-full w-full flex-col gap-8 px-6">
         <div className="text-center max-w-md">
@@ -55,33 +106,17 @@ export default function App() {
             setup.
           </p>
           <Button
-            loading={initialDownload}
+            loading={status === AppStatus.DOWNLOADING}
             onClick={() => {
-              setInitialDownload(true);
+              setStatus(AppStatus.DOWNLOADING);
               chrome.runtime.sendMessage(
                 { type: BackgroundTasks.INITIALIZE_MODELS },
-                () => {
-                  chrome.storage.local.set({
-                    [STORAGE_KEYS.DOWNLOADED_MODELS]: REQUIRED_MODEL_IDS,
-                  });
-                  setDownloadedModels(REQUIRED_MODEL_IDS);
-                  setInitialDownload(false);
-                }
+                () => setStatus(AppStatus.READY)
               );
             }}
             className="w-full"
           >
-            Download Models (
-            {formatBytes(
-              REQUIRED_MODEL_IDS.reduce(
-                (acc, id) =>
-                  acc +
-                  (Object.values(MODELS).find(({ modelId }) => modelId === id)
-                    ?.size || 0),
-                0
-              )
-            )}
-            )
+            Download Models ({formatBytes(modelSize)})
           </Button>
         </div>
         <div className="w-full max-w-md flex flex-col gap-2">

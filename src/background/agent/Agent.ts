@@ -7,8 +7,11 @@ import {
 } from "@huggingface/transformers";
 
 import { MODELS } from "../../shared/constants.ts";
-import { ChatMessage, ChatMessageAssistant } from "../../shared/types.ts";
-import { calculateDownloadProgress } from "../utils/calculateDownloadProgress.ts";
+import {
+  AgentMetrics,
+  ChatMessage,
+  ChatMessageAssistant,
+} from "../../shared/types.ts";
 import { extractToolCalls } from "./extractToolCalls.ts";
 import { ToolCallPayload } from "./types.ts";
 import {
@@ -17,42 +20,46 @@ import {
   webMCPToolToChatTemplateTool,
 } from "./webMcp.tsx";
 
-// Define Message type locally since it may not be exported from the main module
 type Message = {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
   [key: string]: any;
 };
 
+type GenerationMetrics = AgentMetrics;
+export type AgentRunMetrics = AgentMetrics;
+
 interface Pipeline {
   tokenizer: PreTrainedTokenizer;
   model: PreTrainedModel;
 }
 
-let pipeline: Pipeline = null;
+let pipe: Pipeline = null;
+const END_OF_TEXT_TOKEN_REGEX = /<\|end_of_text\|>/g;
+const sanitizeModelText = (text: string) =>
+  text.replace(END_OF_TEXT_TOKEN_REGEX, "").trim();
+
 const getTextGenerationPipeline = async (
   onDownloadProgress: (id: string, percentage: number) => void = () => {}
 ): Promise<Pipeline> => {
-  if (pipeline) return pipeline;
+  if (pipe) return pipe;
 
   try {
     const m = MODELS.granite3B;
 
-    const tokenizer = await AutoTokenizer.from_pretrained(m.modelId, {
-      progress_callback: calculateDownloadProgress(({ percentage }) =>
-        onDownloadProgress(m.modelId, percentage)
-      ),
-    });
-
+    const tokenizer = await AutoTokenizer.from_pretrained(m.modelId);
     const model = await AutoModelForCausalLM.from_pretrained(m.modelId, {
       dtype: m.dtype,
       device: "webgpu",
-      progress_callback: calculateDownloadProgress(({ percentage }) =>
-        onDownloadProgress(m.modelId, percentage)
-      ),
+      progress_callback: (i) => {
+        if (i.status === "progress_total") {
+          onDownloadProgress(m.modelId, i.progress);
+        }
+      },
     });
-    pipeline = { tokenizer, model };
-    return pipeline;
+
+    pipe = { tokenizer, model };
+    return pipe;
   } catch (error) {
     console.error("Failed to initialize feature extraction pipeline:", error);
     throw error;
@@ -99,62 +106,99 @@ class Agent {
     prompt: string,
     role: "user" | "tool" = "user",
     onResponseUpdate: (response: string) => void = () => {}
-  ): Promise<string> => {
-    this.messages = [...this.messages, { role, content: prompt }];
-    const { tokenizer, model } = await this.getTextGenerationPipeline();
+  ): Promise<{ text: string; metrics: GenerationMetrics }> => {
+    const start = performance.now();
+    let firstTokenAt: number | null = null;
 
-    const input = tokenizer.apply_chat_template(this.messages, {
-      tools: this.tools.map(webMCPToolToChatTemplateTool),
-      add_generation_prompt: true,
-      return_dict: true,
-    }) as Object;
+    this.messages = [...this.messages, { role, content: prompt }];
+    const pipe = await this.getTextGenerationPipeline();
+    const conversation = [...this.messages];
 
     let response = "";
 
+    // Add placeholder assistant message for streaming UI updates
     this.messages.push({ role: "assistant", content: "" });
 
-    const streamer = new TextStreamer(tokenizer, {
+    const streamer = new TextStreamer(pipe.tokenizer, {
       skip_prompt: true,
       skip_special_tokens: false,
       callback_function: (token: string) => {
+        if (firstTokenAt === null) {
+          firstTokenAt = performance.now();
+        }
         response = response + token;
         this.messages = this.messages.map((message, index, all) => ({
           ...message,
           content: index === all.length - 1 ? response : message.content,
         }));
-        onResponseUpdate(response.replace(/<\|end_of_text\|>$/, ""));
+        onResponseUpdate(sanitizeModelText(response));
       },
     });
 
+    const input = pipe.tokenizer.apply_chat_template(conversation, {
+      tools: this.tools.map(webMCPToolToChatTemplateTool),
+      add_generation_prompt: true,
+      return_dict: true,
+    }) as any;
+
     // Generate the response
-    const output: any = await model.generate({
+    const output: any = await pipe.model.generate({
       ...input,
       past_key_values: this.pastKeyValues,
       max_new_tokens: 1024,
       do_sample: false,
-      streamer,
       return_dict_in_generate: true,
+      streamer,
     });
+
     const { sequences, past_key_values } = output;
     this.pastKeyValues = past_key_values;
 
-    const inputIds = (input as any).input_ids;
-    response = tokenizer
-      .batch_decode(sequences.slice(null, [inputIds.dims[1], null]), {
+    const promptLength = Number(input.input_ids.dims.at(-1) ?? 0);
+    const totalTokens = Number(sequences.dims.at(-1) ?? promptLength);
+    const generatedTokens = Math.max(0, totalTokens - promptLength);
+
+    response = pipe.tokenizer.batch_decode(
+      sequences.slice(null, [promptLength, null]),
+      {
         skip_special_tokens: false,
-      })[0]
-      .replace(/<\|end_of_text\|>$/, "");
+      }
+    )[0];
+
+    response = sanitizeModelText(response);
 
     this.messages = this.messages.map((message, index, all) => ({
       ...message,
       content: index === all.length - 1 ? response : message.content,
     }));
 
-    return response;
+    const end = performance.now();
+    const prefillMs = Math.max(0, (firstTokenAt ?? end) - start);
+    const totalMs = Math.max(0, end - start);
+    const decodeMs = Math.max(0, totalMs - prefillMs);
+
+    const metrics: GenerationMetrics = {
+      generatedTokens,
+      prefillTokens: promptLength,
+      prefillMs,
+      prefillTokensPerSecond:
+        prefillMs > 0 ? promptLength / (prefillMs / 1000) : 0,
+      decodeMs,
+      totalMs,
+      tokensPerSecond: decodeMs > 0 ? generatedTokens / (decodeMs / 1000) : 0,
+      msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
+    };
+
+    return { text: response, metrics };
   };
 
-  public runAgent = async (prompt: string): Promise<void> => {
+  public runAgent = async (prompt: string): Promise<AgentRunMetrics> => {
     let isUser = true;
+    const start = performance.now();
+    let generatedTokens = 0;
+    let prefillTokens = 0;
+    let prefillMs = 0;
+    let decodeMs = 0;
 
     this.chatMessages = [
       ...this.chatMessages,
@@ -165,6 +209,16 @@ class Agent {
       role: "assistant",
       content: "",
       tools: [],
+      metrics: {
+        generatedTokens: 0,
+        prefillTokens: 0,
+        prefillMs: 0,
+        prefillTokensPerSecond: 0,
+        decodeMs: 0,
+        totalMs: 0,
+        tokensPerSecond: 0,
+        msPerToken: 0,
+      },
     };
 
     this.chatMessages = [...prevChatMessages, assistantMessage];
@@ -195,11 +249,29 @@ class Agent {
     };
 
     while (prompt) {
-      const finalResponse = await this.generateText(
+      const generation = await this.generateText(
         prompt,
         isUser ? "user" : "tool",
         updateAssistantMessage
       );
+      const finalResponse = generation.text;
+      generatedTokens += generation.metrics.generatedTokens;
+      prefillTokens += generation.metrics.prefillTokens;
+      prefillMs += generation.metrics.prefillMs;
+      decodeMs += generation.metrics.decodeMs;
+      const elapsedMs = Math.max(0, performance.now() - start);
+      assistantMessage.metrics = {
+        generatedTokens,
+        prefillTokens,
+        prefillMs,
+        prefillTokensPerSecond:
+          prefillMs > 0 ? prefillTokens / (prefillMs / 1000) : 0,
+        decodeMs,
+        totalMs: elapsedMs,
+        tokensPerSecond: decodeMs > 0 ? generatedTokens / (decodeMs / 1000) : 0,
+        msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
+      };
+
       isUser = false;
       const { toolCalls, message } = extractToolCalls(finalResponse);
       messageInThisAgentRun = message;
@@ -222,7 +294,31 @@ class Agent {
         prompt = toolResponses.map(({ result }) => result).join("\n");
       }
     }
-    return;
+    const totalMs = Math.max(0, performance.now() - start);
+    assistantMessage.metrics = {
+      generatedTokens,
+      prefillTokens,
+      prefillMs,
+      prefillTokensPerSecond:
+        prefillMs > 0 ? prefillTokens / (prefillMs / 1000) : 0,
+      decodeMs,
+      totalMs,
+      tokensPerSecond: decodeMs > 0 ? generatedTokens / (decodeMs / 1000) : 0,
+      msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
+    };
+    this.chatMessages = [...prevChatMessages, assistantMessage];
+
+    return {
+      generatedTokens,
+      prefillTokens,
+      prefillMs,
+      prefillTokensPerSecond:
+        prefillMs > 0 ? prefillTokens / (prefillMs / 1000) : 0,
+      decodeMs,
+      totalMs,
+      tokensPerSecond: decodeMs > 0 ? generatedTokens / (decodeMs / 1000) : 0,
+      msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
+    };
   };
 
   private executeToolCall = async (

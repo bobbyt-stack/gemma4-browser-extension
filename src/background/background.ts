@@ -23,6 +23,8 @@ import FeatureExtractor from "./utils/FeatureExtractor.ts";
 import VectorHistory from "./vectorHistory/VectorHistory.ts";
 
 import Tab = chrome.tabs.Tab;
+import { MODELS, REQUIRED_MODEL_IDS } from "../shared/constants.ts";
+import { ModelRegistry } from "@huggingface/transformers";
 
 let lastProgress: number = 0;
 const onModelDownloadProgress = (modelId: string, percentage: number) => {
@@ -84,6 +86,48 @@ const getAgent = (): Agent => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === BackgroundTasks.CHECK_MODELS) {
+    Promise.all(
+      REQUIRED_MODEL_IDS.map(async (modelId) => {
+        const model = Object.values(MODELS).find((m) => m.modelId === modelId);
+        const files = await ModelRegistry.get_pipeline_files(
+          model.task,
+          modelId,
+          {
+            dtype: model.dtype,
+          }
+        );
+        const metas = await Promise.all(
+          files.map((file) => ModelRegistry.get_file_metadata(modelId, file))
+        );
+        const downloadSize = metas.reduce(
+          (total, item) => total + (item.size ?? 0),
+          0
+        );
+        const isCached = await ModelRegistry.is_pipeline_cached(
+          model.task,
+          modelId,
+          {
+            dtype: model.dtype,
+          }
+        );
+        return {
+          size: downloadSize,
+          cached: isCached,
+          modelId,
+        };
+      })
+    )
+      .then((results) => {
+        sendResponse({ status: ResponseStatus.SUCCESS, results });
+      })
+      .catch((error: Error) => {
+        console.error("CHECK_MODELS failed:", error);
+        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
+      });
+    return true;
+  }
+
   if (message.type === BackgroundTasks.INITIALIZE_MODELS) {
     const agent = getAgent();
     Promise.all([
@@ -116,8 +160,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const agent = getAgent();
     agent
       .runAgent(message.prompt)
-      .then(() => {
-        sendResponse({ status: ResponseStatus.SUCCESS });
+      .then((metrics) => {
+        sendResponse({ status: ResponseStatus.SUCCESS, metrics });
       })
       .catch((error: Error) => {
         console.error("GENERATE_TEXT failed:", error);
@@ -182,7 +226,7 @@ const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
     });
     description = results[0]?.result || "";
   } catch (error) {
-    console.log(`Could not extract description from tab ${tabId}:`, error);
+    console.error(`Could not extract description from tab ${tabId}:`, error);
   }
 
   if (!description) {
