@@ -1,5 +1,6 @@
 {
   "name": "gemma4-transformers.js-extension",
+  "description": "On-device AI agent Chrome extension powered by Transformers.js and Gemma 4",
   "private": true,
   "version": "0.0.1",
   "type": "module",
