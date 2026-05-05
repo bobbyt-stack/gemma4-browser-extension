@@ -1,4 +1,4 @@
-# Transformers.js Browser Assistant
+# Ternary-Bonsai Browser Assistant
 
 ## About this extension
 
