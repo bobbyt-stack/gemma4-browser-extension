@@ -163,11 +163,7 @@ class Agent {
       add_generation_prompt: true,
       past_key_values: this.pastKeyValues,
       max_new_tokens: 1024,
-      do_sample: true,
-      temperature: 0.5,
-      top_k: 20,
-      top_p: 0.85,
-      repetition_penalty: 1.0,
+      do_sample: false,
       streamer,
     });
 
@@ -199,7 +195,7 @@ class Agent {
                   ? functionArguments
                   : JSON.stringify(functionArguments);
 
-              return `<tool_call>\n{"name": "${functionName}", "arguments": ${serializedArguments}}\n</tool_call>`;
+              return `<|tool_call>call:${functionName}${serializedArguments}<tool_call|>`;
             })
             .filter(Boolean)
             .join("");
