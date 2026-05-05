@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Qwen3 Browser Assistant",
+  "name": "Ternary-Bonsai Browser Assistant",
   "version": "0.2.1",
-  "description": "On-device AI Browser Assistant powered by Transformers.js and Qwen3",
+  "description": "On-device AI Browser Assistant powered by Transformers.js and Ternary-Bonsai",
   "permissions": ["sidePanel", "storage", "scripting", "tabs", "downloads"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_security_policy": {
