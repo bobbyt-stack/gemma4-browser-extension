@@ -195,7 +195,7 @@ class Agent {
                   ? functionArguments
                   : JSON.stringify(functionArguments);
 
-              return `<|tool_call>call:${functionName}${serializedArguments}<tool_call|>`;
+              return `<tool_call>\n{"name": "${functionName}", "arguments": ${serializedArguments}}\n</tool_call>`;
             })
             .filter(Boolean)
             .join("");
