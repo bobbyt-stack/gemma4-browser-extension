@@ -163,7 +163,11 @@ class Agent {
       add_generation_prompt: true,
       past_key_values: this.pastKeyValues,
       max_new_tokens: 1024,
-      do_sample: false,
+      do_sample: true,
+      temperature: 0.5,
+      top_k: 20,
+      top_p: 0.85,
+      repetition_penalty: 1.0,
       streamer,
     });
 
