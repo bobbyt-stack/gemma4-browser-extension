@@ -42,9 +42,15 @@ export const MODELS: Record<
     dtype: "q4f16",
     task: "text-generation",
   },
+  ternaryBonsai: {
+    modelId: "onnx-community/Ternary-Bonsai-4B-ONNX",
+    title: "Ternary-Bonsai 4B",
+    dtype: "q2",
+    task: "text-generation",
+  },
 };
 
-export const TEXT_GENERATION_ID = "gemma4E2B";
+export const TEXT_GENERATION_ID = "ternaryBonsai";
 export const FEATURE_EXTRACTION_ID = "allMiniLM";
 
 export const REQUIRED_MODEL_IDS = [

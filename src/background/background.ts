@@ -1,12 +1,13 @@
 import { ModelRegistry } from "@huggingface/transformers";
 
-import { MODELS, REQUIRED_MODEL_IDS } from "../shared/constants.ts";
+import { MODELS, REQUIRED_MODEL_IDS, TEXT_GENERATION_ID } from "../shared/constants.ts";
 import { AvailableTools } from "../shared/tools.ts";
 import {
   BackgroundMessages,
   BackgroundTasks,
   ResponseStatus,
 } from "../shared/types.ts";
+import { logger } from "../shared/logger.ts";
 import Agent from "./agent/Agent.ts";
 import {
   createAskWebsiteTool,
@@ -30,12 +31,25 @@ const onModelDownloadProgress = (modelId: string, percentage: number) => {
   if (rounded === lastProgress) return;
   lastProgress = rounded;
 
+  logger.debug("Background", `Model download progress: ${modelId}`, { percentage: rounded });
+
   chrome.runtime.sendMessage({
     type: BackgroundMessages.DOWNLOAD_PROGRESS,
     modelId,
     percentage: rounded,
   });
 };
+
+logger.info("Background", "Extension initialized", {
+  version: chrome.runtime.getManifest().version,
+  models: REQUIRED_MODEL_IDS,
+  modelConfig: {
+    modelId: MODELS[TEXT_GENERATION_ID].modelId,
+    modelTitle: MODELS[TEXT_GENERATION_ID].title,
+  },
+});
+
+logger.setAppInfo(MODELS[TEXT_GENERATION_ID].modelId, MODELS[TEXT_GENERATION_ID].title);
 
 const featureExtractor = new FeatureExtractor();
 const vectorHistory = new VectorHistory(featureExtractor);
@@ -84,6 +98,8 @@ const getAgent = (): Agent => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  logger.debug("Background", "Message received", { type: message.type });
+  
   if (message.type === BackgroundTasks.CHECK_MODELS) {
     Promise.all(
       REQUIRED_MODEL_IDS.map(async (modelId) => {
@@ -120,7 +136,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ status: ResponseStatus.SUCCESS, results });
       })
       .catch((error: Error) => {
-        console.error("CHECK_MODELS failed:", error);
+        logger.error("Background", "CHECK_MODELS failed", null, error);
         sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
     return true;
@@ -156,13 +172,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === BackgroundTasks.AGENT_GENERATE_TEXT) {
     const agent = getAgent();
+    logger.info("Background", "AGENT_GENERATE_TEXT", { prompt: message.prompt?.substring(0, 50) });
     agent
       .runAgent(message.prompt)
       .then((metrics) => {
+        logger.debug("Background", "AGENT_GENERATE_TEXT complete", metrics);
         sendResponse({ status: ResponseStatus.SUCCESS, metrics });
       })
       .catch((error: Error) => {
-        console.error("GENERATE_TEXT failed:", error);
+        logger.error("Background", "AGENT_GENERATE_TEXT failed", null, error);
         sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
 
@@ -191,11 +209,52 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       .then((result) => {
         sendResponse({ status: ResponseStatus.SUCCESS, result: result[0] });
       })
-      .catch((error) => {
-        console.error("EXTRACT_FEATURES failed:", error);
+      .catch((error: Error) => {
+        logger.error("Background", "EXTRACT_FEATURES failed", { text: message.text?.substring(0, 50) }, error);
         sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
 
+    return true;
+  }
+
+  if (message.type === "GET_DEBUG_LOGS") {
+    logger.getLogs(500).then((logs) => {
+      console.log("=== EXTENSION LOGS ===");
+      logs.forEach((log) => {
+        console.log(`[${new Date(log.timestamp).toISOString()}] [${log.source}] ${log.message}`, log.data);
+      });
+      sendResponse({ status: ResponseStatus.SUCCESS, logs });
+    });
+    return true;
+  }
+
+  if (message.type === "EXPORT_LOGS") {
+    logger.exportLogs().then(async (logsJson) => {
+      try {
+        const blob = new Blob([logsJson], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        
+        // Use chrome.downloads API to save file
+        await chrome.downloads.download({
+          url: url,
+          filename: `extension-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+          saveAs: true,
+        });
+        
+        logger.info("Background", "Logs exported to downloads folder");
+      } catch (err) {
+        logger.error("Background", "Failed to export logs", null, err as Error);
+      }
+      sendResponse({ status: ResponseStatus.SUCCESS });
+    });
+    return true;
+  }
+
+  if (message.type === "CLEAR_LOGS") {
+    logger.clearLogs().then(() => {
+      logger.info("Background", "Logs cleared");
+      sendResponse({ status: ResponseStatus.SUCCESS });
+    });
     return true;
   }
 
@@ -224,7 +283,7 @@ const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
     });
     description = results[0]?.result || "";
   } catch (error) {
-    console.error(`Could not extract description from tab ${tabId}:`, error);
+    logger.warn("Background", "Could not extract description", { tabId });
   }
 
   if (!description) {
@@ -234,8 +293,10 @@ const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
   // Add to vector history
   try {
     await vectorHistory.addEntry(title, description, tab.url);
+    logger.info("Background", "Added to vector history", { title, url: tab.url });
   } catch (error) {
-    console.error("Failed to add page to vector history:", error);
+    const err = error as Error;
+    logger.error("Background", "Failed to add page to vector history", { title }, err);
   }
 };
 

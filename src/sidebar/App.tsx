@@ -99,7 +99,7 @@ export default function App() {
       <div className="flex items-center justify-center h-full w-full flex-col gap-8 px-6">
         <div className="text-center max-w-md">
           <h1 className="text-3xl font-normal text-chrome-text-primary mb-2">
-            Welcome to Gemma 4
+            Welcome to Ternary-Bonsai
           </h1>
           <p className="text-sm text-chrome-text-secondary mb-6">
             Download the required AI models to get started. This is a one-time
@@ -138,6 +138,23 @@ export default function App() {
       <main className="flex-1 overflow-y-auto bg-chrome-bg-primary">
         <Chat />
       </main>
+      <div className="p-2 border-t border-chrome-border flex justify-between items-center bg-chrome-bg-secondary">
+        <button 
+          onClick={async () => {
+            try {
+              await chrome.runtime.sendMessage({ type: "EXPORT_LOGS" });
+            } catch (e) {
+              console.error("Export failed:", e);
+            }
+          }}
+          className="text-xs text-chrome-text-secondary hover:text-chrome-accent-primary"
+        >
+          Export Logs
+        </button>
+        <span className="text-xs text-chrome-text-secondary">
+          v{chrome.runtime.getManifest().version}
+        </span>
+      </div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-# Transformers.js Gemma 4 Browser Assistant
+# Transformers.js Ternary Rainier Browser Assistant
 
 ## About this extension
 

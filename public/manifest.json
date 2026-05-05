@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Transformers.js Gemma 4 Browser Assistant",
+  "name": "Qwen3 Browser Assistant",
   "version": "0.2.1",
-  "description": "On-device AI Browser Assistant powered by Transformers.js and Gemma 4 E2B",
-  "permissions": ["sidePanel", "storage", "scripting", "tabs"],
+  "description": "On-device AI Browser Assistant powered by Transformers.js and Qwen3",
+  "permissions": ["sidePanel", "storage", "scripting", "tabs", "downloads"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
