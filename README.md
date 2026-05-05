@@ -1,4 +1,4 @@
-# Transformers.js Ternary Rainier Browser Assistant
+# Transformers.js Browser Assistant
 
 ## About this extension
 
@@ -39,12 +39,21 @@ The extension maintains a semantic search-enabled history database:
 - Chrome browser with WebGPU support (Chrome 113+)
 - Modern GPU with WebGPU capabilities
 
-#### Setup
+#### Quick Load
+
+The extension includes a pre-built `dist/` folder. To use immediately:
+
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked"
+4. Select the `dist` folder
+
+#### Build from Source
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
-cd tfjs-agentgemma-extension
+git clone https://github.com/bobbyt-stack/gemma4-browser-extension
+cd gemma4-browser-extension
 ```
 
 2. Install dependencies:
@@ -76,6 +85,7 @@ pnpm run dev
 1. Click the extension icon to open the sidebar panel
 2. On first use, the models will download automatically (one-time)
 3. Once loaded, interact with the AI agent through the chat interface
+4. If issues occur, click "Export Logs" in the sidebar footer to download debug logs
 
 ### Permissions
 
@@ -86,17 +96,27 @@ The extension requires these permissions:
 - `storage`: Save settings and model cache
 - `scripting`: Inject content scripts
 - `tabs`: Needed to read the tab URL
+- `downloads`: Save log files
 - `host_permissions`: Access webpage content on all URLs
 
 ---
-## Gemma 4
 
-This extension uses the `onnx-community/gemma-4-E2B-it-ONNX` instruction-tuned model from Hugging Face:
+## Supported Models
 
-- Model card: https://huggingface.co/onnx-community/gemma-4-E2B-it-ONNX
-- Format: ONNX (optimized for browser inference with Transformers.js + WebGPU)
+This extension supports multiple ONNX models for browser-based inference:
+
+### Text Generation
+- **Ternary-Bonsai-4B-ONNX** (default): 4B parameters, ternary quantization (~2GB)
+- **Qwen3-1.7B-ONNX**: 1.7B parameters, q4f16 quantization (~1.4GB)
+- **Gemma-4-E2B-ONNX**: 2B parameters, q4f16 quantization (~4GB)
+
+### Feature Extraction
+- **all-MiniLM-L6-v2-ONNX**: Used for semantic search embeddings
+
+To switch models, update `TEXT_GENERATION_ID` in `src/shared/constants.ts` and rebuild.
 
 ---
+
 ## Extension Architecture
 
 This extension demonstrates an effective architecture for integrating Transformers.js into browser extensions. The design separates concerns across three key components, each optimized for specific tasks.
@@ -182,3 +202,13 @@ This architecture is particularly well-suited for browser-based ML:
 3. **Scalable**: Can handle requests from multiple tabs simultaneously
 4. **Secure**: Maintains browser security model while enabling powerful features
 5. **WebGPU acceleration**: Background script can leverage WebGPU for fast inference
+
+---
+
+## Debugging
+
+If the extension is not working correctly:
+
+1. Click "Export Logs" in the sidebar footer to download debug logs
+2. Check Chrome DevTools (Extensions → Service Worker → Console) for error messages
+3. Logs are also saved to Chrome storage and include timestamps, sources, and error details
