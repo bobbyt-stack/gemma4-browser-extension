@@ -106,9 +106,12 @@ The extension requires these permissions:
 This extension supports multiple ONNX models for browser-based inference:
 
 ### Text Generation
-- **Ternary-Bonsai-4B-ONNX** (default): 4B parameters, ternary quantization (~2GB)
-- **Qwen3-1.7B-ONNX**: 1.7B parameters, q4f16 quantization (~1.4GB)
+- **Ternary-Bonsai-4B-ONNX** (default): 4B parameters, q2 ternary quantization (~2.25GB)
 - **Gemma-4-E2B-ONNX**: 2B parameters, q4f16 quantization (~4GB)
+- **Gemma-4-E4B-ONNX**: 4B parameters, q4f16 quantization (~4GB)
+- **Granite-4.0-350M-ONNX-web**: 350M parameters, fp16 (~700MB)
+- **Granite-4.0-1B-ONNX-web**: 1B parameters, q4 quantization (~1GB)
+- **Granite-4.0-micro-ONNX-web**: ~3B parameters, q4f16 quantization
 
 ### Feature Extraction
 - **all-MiniLM-L6-v2-ONNX**: Used for semantic search embeddings
