@@ -19,8 +19,7 @@ export type AgentRunMetrics = AgentMetrics;
 
 const SYSTEM_PROMPT =
   "You are a concise browser assistant. Use tools only when needed. " +
-  'Tool call format: <tool_call>{"name":"tool_name","arguments":{}}</tool_call>. ' +
-  "After tool results, answer the user directly.";
+  "Do not call tools for greetings or questions you can answer directly.";
 const createInitialMessages = (): Array<Message> => [
   {
     role: "system",
@@ -142,6 +141,7 @@ class Agent {
   };
 
   public runAgent = async (prompt: string): Promise<AgentRunMetrics> => {
+    const initialPrompt = prompt;
     let roleForGeneration: "user" | "tool" = "user";
     let appendPromptMessage = true;
     const start = performance.now();
@@ -151,6 +151,7 @@ class Agent {
     let decodeMs = 0;
     const MAX_TOOL_CALLS = 3;
     let toolCallCount = 0;
+    let directAnswerRetryCount = 0;
 
     try {
       logger.info(
@@ -183,7 +184,7 @@ class Agent {
 
       let messageInThisAgentRun = "";
       const updateAssistantMessage = (response: string) => {
-        const { toolCalls, message } = extractToolCalls(response);
+        const { toolCalls, message } = this.extractEnabledToolCalls(response);
         logger.debug(
           "Agent",
           `extractToolCalls found ${toolCalls.length} tools`
@@ -239,11 +240,53 @@ class Agent {
           msPerToken: generatedTokens > 0 ? decodeMs / generatedTokens : 0,
         };
 
-        const { toolCalls, message } = extractToolCalls(finalResponse);
+        const { toolCalls, message } =
+          this.extractEnabledToolCalls(finalResponse);
         messageInThisAgentRun = message;
         toolCallCount++;
 
-        if (toolCalls.length === 0 || toolCallCount >= MAX_TOOL_CALLS) {
+        if (
+          toolCalls.length > 0 &&
+          !this.shouldExecuteToolForPrompt(initialPrompt)
+        ) {
+          logger.warn("Agent", "Ignored tool call for non-tool prompt", {
+            prompt: initialPrompt,
+            toolNames: toolCalls.map((toolCall) => toolCall.name),
+          });
+          prompt = null;
+          assistantMessage.tools = [];
+          assistantMessage.content =
+            message.trim().length > 0
+              ? message
+              : this.fallbackDirectResponse(initialPrompt);
+          this.messages = this.messages.map((historyMessage, index, all) => ({
+            ...historyMessage,
+            content:
+              index === all.length - 1
+                ? assistantMessage.content
+                : historyMessage.content,
+          }));
+        } else if (
+          toolCalls.length === 0 &&
+          finalResponse.includes("<tool_call>") &&
+          message.trim().length === 0 &&
+          directAnswerRetryCount === 0
+        ) {
+          directAnswerRetryCount += 1;
+          for (let i = this.messages.length - 1; i >= 0; i -= 1) {
+            if (this.messages[i].role === "assistant") {
+              this.messages[i] = {
+                ...this.messages[i],
+                content: "",
+              };
+              break;
+            }
+          }
+          prompt =
+            "Answer the user's last message directly in plain text. Do not call tools.";
+          roleForGeneration = "user";
+          appendPromptMessage = true;
+        } else if (toolCalls.length === 0 || toolCallCount >= MAX_TOOL_CALLS) {
           prompt = null;
         } else {
           const toolResponses = await Promise.all(
@@ -365,12 +408,35 @@ class Agent {
     this.chatMessages = [];
   }
 
+  private extractEnabledToolCalls(text: string): {
+    toolCalls: ToolCallPayload[];
+    message: string;
+  } {
+    const parsed = extractToolCalls(text);
+    const enabledToolNames = new Set(this.tools.map((tool) => tool.name));
+    const toolCalls = parsed.toolCalls.filter((toolCall) =>
+      enabledToolNames.has(toolCall.name)
+    );
+
+    if (parsed.toolCalls.length !== toolCalls.length) {
+      logger.warn("Agent", "Ignored invalid tool call", {
+        parsedToolNames: parsed.toolCalls.map((toolCall) => toolCall.name),
+        enabledToolNames: [...enabledToolNames],
+      });
+    }
+
+    return { ...parsed, toolCalls };
+  }
+
   private messagesForTrillim(): Array<TrillimMessage> {
     const [first, ...rest] = this.messages;
+    const toolInstructions = this.renderToolInstructions();
     return [
       {
         role: "system",
-        content: `${first.content}\n\n${this.renderToolInstructions()}`,
+        content: toolInstructions
+          ? `${first.content}\n\n${toolInstructions}`
+          : first.content,
       },
       ...rest
         .filter((message) => message.content.trim().length > 0)
@@ -382,17 +448,23 @@ class Agent {
   }
 
   private renderToolInstructions(): string {
-    if (this.tools.length === 0) return "Tools: none.";
+    if (this.tools.length === 0) return "";
 
     const tools = this.tools
-      .map((tool) => `- ${tool.name} ${this.renderToolArguments(tool)}`)
-      .join("\n");
+      .map((tool) => `${tool.name}${this.renderToolArguments(tool)}`)
+      .join(", ");
 
-    return `Tools:\n${tools}`;
+    return (
+      `The following tools are available: ${tools}.\n` +
+      "Call it as follows: <tool_call>{JSON with name and arguments}</tool_call>\n" +
+      "Use only listed tool names. If no tool is needed, answer normally."
+    );
   }
 
   private renderToolArguments(tool: WebMCPTool): string {
-    const entries = Object.entries(tool.inputSchema.properties);
+    const entries = Object.entries(tool.inputSchema.properties).filter(
+      ([name]) => tool.inputSchema.required.includes(name)
+    );
     if (entries.length === 0) return "{}";
 
     const args = entries.reduce<Record<string, string>>(
@@ -403,7 +475,22 @@ class Agent {
       {}
     );
 
-    return JSON.stringify(args);
+    return `(${Object.entries(args)
+      .map(([name, type]) => `${name}:${type}`)
+      .join(",")})`;
+  }
+
+  private shouldExecuteToolForPrompt(prompt: string): boolean {
+    return /\b(tab|tabs|open|close|go to|switch|browser|page|website|history|url|highlight|find|search|current site|current page)\b/i.test(
+      prompt
+    );
+  }
+
+  private fallbackDirectResponse(prompt: string): string {
+    if (/^\s*(hi|hello|hey|yo|sup)\b[!.\s]*$/i.test(prompt)) {
+      return "Hello! How can I help?";
+    }
+    return "I can answer that directly. What would you like to know?";
   }
 }
 
