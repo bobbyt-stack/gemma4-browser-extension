@@ -108,10 +108,6 @@ export default function Chat() {
       }
     );
 
-    chrome.runtime.sendMessage({
-      type: BackgroundTasks.AGENT_CLEAR,
-    });
-
     chrome.runtime.onMessage.addListener((message) => {
       if (message.type === BackgroundMessages.MESSAGES_UPDATE) {
         setMessages(message.messages);

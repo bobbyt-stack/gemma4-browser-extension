@@ -11,7 +11,7 @@ import {
   BackgroundTasks,
   ResponseStatus,
 } from "../shared/types.ts";
-import Agent from "./agent/Agent.ts";
+import Agent, { AgentState } from "./agent/Agent.ts";
 import {
   createAskWebsiteTool,
   highlightWebsiteElementTool,
@@ -61,6 +61,9 @@ const featureExtractor = new FeatureExtractor();
 const vectorHistory = new VectorHistory(featureExtractor);
 let currentAgent: Agent | null = null;
 
+const ACTIVE_TOOLS_STORAGE_KEY = "activeTools";
+const AGENT_STATE_STORAGE_KEY = "agentState";
+
 const availableTools: Record<string, () => any> = {
   [AvailableTools.GET_OPEN_TABS]: () => getOpenTabsTool,
   [AvailableTools.GO_TO_TAB]: () => goToTabTool,
@@ -72,7 +75,7 @@ const availableTools: Record<string, () => any> = {
   //[AvailableTools.GOOGLE_SEARCH]: () => googleSearchTool,
 };
 
-const createAgent = (toolNames?: string[]): Agent => {
+const createAgent = (toolNames?: string[], state?: AgentState): Agent => {
   const agent = new Agent();
 
   const toolsToRegister = toolNames ?? [];
@@ -86,19 +89,54 @@ const createAgent = (toolNames?: string[]): Agent => {
     }
   }
 
-  agent.onChatMessageUpdate((messages) =>
+  if (state) {
+    agent.restoreState(state);
+  }
+
+  agent.onChatMessageUpdate((messages) => {
+    void persistAgentState(agent);
     chrome.runtime.sendMessage({
       type: BackgroundMessages.MESSAGES_UPDATE,
       messages,
-    })
-  );
+    });
+  });
 
   return agent;
 };
 
-const getAgent = (): Agent => {
+const getStoredActiveTools = async (): Promise<string[]> => {
+  const stored = await chrome.storage.local.get(ACTIVE_TOOLS_STORAGE_KEY);
+  return Array.isArray(stored[ACTIVE_TOOLS_STORAGE_KEY])
+    ? stored[ACTIVE_TOOLS_STORAGE_KEY]
+    : [];
+};
+
+const getStoredAgentState = async (): Promise<AgentState | undefined> => {
+  const stored = await chrome.storage.local.get(AGENT_STATE_STORAGE_KEY);
+  const state = stored[AGENT_STATE_STORAGE_KEY] as
+    | Partial<AgentState>
+    | undefined;
+  if (!state || !Array.isArray(state.messages)) return undefined;
+  return state as AgentState;
+};
+
+const persistAgentState = async (agent = currentAgent) => {
+  if (!agent) return;
+  await chrome.storage.local.set({
+    [AGENT_STATE_STORAGE_KEY]: agent.getState(),
+  });
+};
+
+const clearStoredAgentState = async () => {
+  await chrome.storage.local.remove(AGENT_STATE_STORAGE_KEY);
+};
+
+const getAgent = async (): Promise<Agent> => {
   if (!currentAgent) {
-    currentAgent = createAgent();
+    currentAgent = createAgent(
+      await getStoredActiveTools(),
+      await getStoredAgentState()
+    );
   }
   return currentAgent;
 };
@@ -134,11 +172,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === BackgroundTasks.INITIALIZE_MODELS) {
-    const agent = getAgent();
     Promise.all([
+      getAgent(),
       featureExtractor.getFeatureExtractionPipeline(onModelDownloadProgress),
-      agent.getTextGenerationPipeline(onModelDownloadProgress),
     ])
+      .then(([agent]) =>
+        agent.getTextGenerationPipeline(onModelDownloadProgress)
+      )
       .then(() => {
         sendResponse({ status: ResponseStatus.SUCCESS });
       })
@@ -152,25 +192,39 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === BackgroundTasks.AGENT_INITIALIZE) {
     const tools = message.tools as string[] | undefined;
-    currentAgent = createAgent(tools);
-    sendResponse({ status: ResponseStatus.SUCCESS });
-    chrome.runtime.sendMessage({
-      type: BackgroundMessages.MESSAGES_UPDATE,
-      messages: [],
+    const statePromise = currentAgent
+      ? Promise.resolve(currentAgent.getState())
+      : getStoredAgentState();
+
+    Promise.all([
+      chrome.storage.local.set({
+        [ACTIVE_TOOLS_STORAGE_KEY]: tools ?? [],
+      }),
+      statePromise,
+    ]).then(([, state]) => {
+      currentAgent = createAgent(tools, state);
+      persistAgentState(currentAgent).then(() => {
+        sendResponse({ status: ResponseStatus.SUCCESS });
+        chrome.runtime.sendMessage({
+          type: BackgroundMessages.MESSAGES_UPDATE,
+          messages: currentAgent?.chatMessages ?? [],
+        });
+      });
     });
     return true;
   }
 
   if (message.type === BackgroundTasks.AGENT_GENERATE_TEXT) {
-    const agent = getAgent();
     logger.info("Background", "AGENT_GENERATE_TEXT", {
       prompt: message.prompt?.substring(0, 50),
     });
-    agent
-      .runAgent(message.prompt)
-      .then((metrics) => {
-        logger.debug("Background", "AGENT_GENERATE_TEXT complete", metrics);
-        sendResponse({ status: ResponseStatus.SUCCESS, metrics });
+    getAgent()
+      .then((agent) => {
+        return agent.runAgent(message.prompt).then((metrics) => {
+          void persistAgentState(agent);
+          logger.debug("Background", "AGENT_GENERATE_TEXT complete", metrics);
+          sendResponse({ status: ResponseStatus.SUCCESS, metrics });
+        });
       })
       .catch((error: Error) => {
         logger.error("Background", "AGENT_GENERATE_TEXT failed", null, error);
@@ -181,18 +235,22 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === BackgroundTasks.AGENT_GET_MESSAGES) {
-    const agent = getAgent();
-    sendResponse({
-      status: ResponseStatus.SUCCESS,
-      messages: agent.chatMessages,
+    getAgent().then((agent) => {
+      sendResponse({
+        status: ResponseStatus.SUCCESS,
+        messages: agent.chatMessages,
+      });
     });
     return true;
   }
 
   if (message.type === BackgroundTasks.AGENT_CLEAR) {
-    const agent = getAgent();
-    agent.clear();
-    sendResponse({ status: ResponseStatus.SUCCESS });
+    getAgent().then((agent) => {
+      agent.clear();
+      clearStoredAgentState().then(() => {
+        sendResponse({ status: ResponseStatus.SUCCESS });
+      });
+    });
     return true;
   }
 

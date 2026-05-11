@@ -9,10 +9,15 @@ import { extractToolCalls } from "./extractToolCalls.ts";
 import { ToolCallPayload } from "./types.ts";
 import { WebMCPTool, executeWebMCPTool } from "./webMcp.tsx";
 
-type Message = {
+export type AgentMessage = {
   role: "system" | "user" | "assistant";
   content: string;
 };
+
+export interface AgentState {
+  messages: AgentMessage[];
+  chatMessages: ChatMessage[];
+}
 
 type GenerationMetrics = AgentMetrics;
 export type AgentRunMetrics = AgentMetrics;
@@ -20,7 +25,7 @@ export type AgentRunMetrics = AgentMetrics;
 const SYSTEM_PROMPT =
   "You are a concise browser assistant. Use tools only when needed. " +
   "Do not call tools for greetings or questions you can answer directly.";
-const createInitialMessages = (): Array<Message> => [
+const createInitialMessages = (): Array<AgentMessage> => [
   {
     role: "system",
     content: SYSTEM_PROMPT,
@@ -36,7 +41,7 @@ const sanitizeModelText = (text: string) =>
 
 class Agent {
   private trillim = new TrillimClient();
-  private messages: Array<Message> = createInitialMessages();
+  private messages: Array<AgentMessage> = createInitialMessages();
   private _chatMessages: Array<ChatMessage> = [];
   private chatMessagesListener: Array<
     (chatMessages: Array<ChatMessage>) => void
@@ -61,6 +66,29 @@ class Agent {
   public setTool = (tool: WebMCPTool) => {
     this.tools = [...this.tools, tool];
   };
+
+  public getState(): AgentState {
+    return {
+      messages: this.messages,
+      chatMessages: this.chatMessages,
+    };
+  }
+
+  public restoreState(state?: Partial<AgentState>) {
+    if (Array.isArray(state?.messages) && state.messages.length > 0) {
+      this.messages = state.messages.filter(
+        (message): message is AgentMessage =>
+          (message.role === "system" ||
+            message.role === "user" ||
+            message.role === "assistant") &&
+          typeof message.content === "string"
+      );
+    }
+
+    if (Array.isArray(state?.chatMessages)) {
+      this._chatMessages = state.chatMessages;
+    }
+  }
 
   public getTextGenerationPipeline = async (
     onDownloadProgress: (id: string, percentage: number) => void = () => {}
