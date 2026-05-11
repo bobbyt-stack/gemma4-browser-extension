@@ -18,13 +18,9 @@ type GenerationMetrics = AgentMetrics;
 export type AgentRunMetrics = AgentMetrics;
 
 const SYSTEM_PROMPT =
-  "You are a helpful assistant with access to external tools declared in this conversation. " +
-  "Never claim you do not have tools when tool declarations are present. " +
-  "When asked what tools you have, list the declared tool names exactly. " +
-  'When you need to use a tool, respond only with <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>. ' +
-  "IMPORTANT: After receiving tool results, respond with a FINAL answer to the user's question. " +
-  "Do NOT call tools again after getting results unless absolutely necessary. " +
-  "If you can answer the user's question from the tool results, do so directly without calling more tools.";
+  "You are a concise browser assistant. Use tools only when needed. " +
+  'Tool call format: <tool_call>{"name":"tool_name","arguments":{}}</tool_call>. ' +
+  "After tool results, answer the user directly.";
 const createInitialMessages = (): Array<Message> => [
   {
     role: "system",
@@ -386,17 +382,28 @@ class Agent {
   }
 
   private renderToolInstructions(): string {
-    if (this.tools.length === 0)
-      return "No browser tools are currently enabled.";
+    if (this.tools.length === 0) return "Tools: none.";
 
     const tools = this.tools
-      .map(
-        (tool) =>
-          `- ${tool.name}: ${tool.description}\n  arguments: ${JSON.stringify(tool.inputSchema)}`
-      )
+      .map((tool) => `- ${tool.name} ${this.renderToolArguments(tool)}`)
       .join("\n");
 
-    return `Available browser tools:\n${tools}\n\nUse exactly this syntax when calling a tool:\n<tool_call>{\"name\":\"tool_name\",\"arguments\":{}}</tool_call>`;
+    return `Tools:\n${tools}`;
+  }
+
+  private renderToolArguments(tool: WebMCPTool): string {
+    const entries = Object.entries(tool.inputSchema.properties);
+    if (entries.length === 0) return "{}";
+
+    const args = entries.reduce<Record<string, string>>(
+      (acc, [name, property]) => ({
+        ...acc,
+        [name]: property.type,
+      }),
+      {}
+    );
+
+    return JSON.stringify(args);
   }
 }
 
