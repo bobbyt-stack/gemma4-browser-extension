@@ -1,6 +1,6 @@
 {
   "name": "ternary-rainier-browser-assistant",
-  "description": "On-device AI agent Chrome extension powered by Transformers.js and Ternary Rainier",
+  "description": "On-device AI agent Chrome extension powered by Trillim",
   "private": true,
   "version": "0.2.1",
   "type": "module",
@@ -11,7 +11,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@huggingface/transformers": "^4.2.0",
     "idb": "^8.0.3",
     "lucide-react": "^0.553.0",
     "react": "^19.2.0",

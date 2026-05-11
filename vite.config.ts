@@ -19,7 +19,9 @@ export default defineConfig({
           let content = readFileSync(contentPath, "utf-8");
 
           // Find the import statement and extract the imported variable name
-          const importMatch = content.match(/import\{([A-Z])\s+as\s+([a-z])\}from"([^"]+)";/);
+          const importMatch = content.match(
+            /import\{([A-Z])\s+as\s+([a-z])\}from"([^"]+)";/
+          );
           if (importMatch) {
             const importedName = importMatch[1]; // e.g., "C"
             const localName = importMatch[2]; // e.g., "a"
@@ -31,18 +33,29 @@ export default defineConfig({
 
             // Find which variable is exported as importedName
             // Format: export{S as B,T as C,A as R,G as a};
-            const exportPattern = new RegExp(`([A-Z])\\s+as\\s+${importedName}[,}]`);
+            const exportPattern = new RegExp(
+              `([A-Z])\\s+as\\s+${importedName}[,}]`
+            );
             const exportMatch = importedContent.match(exportPattern);
 
             if (exportMatch) {
               const actualVarName = exportMatch[1]; // e.g., "T"
 
               // Inline the content and replace the actual variable name with local name
-              let inlinedContent = importedContent.replace(/export\{[^}]+\};?/, '');
+              let inlinedContent = importedContent.replace(
+                /export\{[^}]+\};?/,
+                ""
+              );
               // Replace both "var T=" and ",T=" patterns
-              inlinedContent = inlinedContent.replace(new RegExp(`([,\\s])${actualVarName}=`, 'g'), `$1${localName}=`);
+              inlinedContent = inlinedContent.replace(
+                new RegExp(`([,\\s])${actualVarName}=`, "g"),
+                `$1${localName}=`
+              );
               // Also replace references like (T||{})
-              inlinedContent = inlinedContent.replace(new RegExp(`\\(${actualVarName}\\|\\|`, 'g'), `(${localName}||`);
+              inlinedContent = inlinedContent.replace(
+                new RegExp(`\\(${actualVarName}\\|\\|`, "g"),
+                `(${localName}||`
+              );
 
               // Replace the import with the inlined content
               content = content.replace(importMatch[0], inlinedContent);
@@ -102,14 +115,11 @@ export default defineConfig({
         // Prevent code splitting for content script
         manualChunks: (id) => {
           // If the module is imported by content script, inline it
-          if (id.includes('src/content') || id.includes('src/shared')) {
+          if (id.includes("src/content") || id.includes("src/shared")) {
             return undefined;
           }
         },
       },
     },
-  },
-  optimizeDeps: {
-    exclude: ["@huggingface/transformers"],
   },
 });
