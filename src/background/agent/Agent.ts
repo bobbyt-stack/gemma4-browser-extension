@@ -141,7 +141,6 @@ class Agent {
   };
 
   public runAgent = async (prompt: string): Promise<AgentRunMetrics> => {
-    const initialPrompt = prompt;
     let roleForGeneration: "user" | "tool" = "user";
     let appendPromptMessage = true;
     const start = performance.now();
@@ -152,7 +151,6 @@ class Agent {
     const MAX_TOOL_CALLS = 3;
     let toolCallCount = 0;
     let directAnswerRetryCount = 0;
-    let hasOpenTabsContext = false;
 
     try {
       logger.info(
@@ -247,27 +245,6 @@ class Agent {
         toolCallCount++;
 
         if (
-          toolCalls.length > 0 &&
-          !this.shouldExecuteToolForPrompt(initialPrompt)
-        ) {
-          logger.warn("Agent", "Ignored tool call for non-tool prompt", {
-            prompt: initialPrompt,
-            toolNames: toolCalls.map((toolCall) => toolCall.name),
-          });
-          prompt = null;
-          assistantMessage.tools = [];
-          assistantMessage.content =
-            message.trim().length > 0
-              ? message
-              : this.fallbackDirectResponse(initialPrompt);
-          this.messages = this.messages.map((historyMessage, index, all) => ({
-            ...historyMessage,
-            content:
-              index === all.length - 1
-                ? assistantMessage.content
-                : historyMessage.content,
-          }));
-        } else if (
           toolCalls.length === 0 &&
           finalResponse.includes("<tool_call>") &&
           message.trim().length === 0 &&
@@ -290,19 +267,9 @@ class Agent {
         } else if (toolCalls.length === 0 || toolCallCount >= MAX_TOOL_CALLS) {
           prompt = null;
         } else {
-          const toolCallsToExecute = this.resolveToolDependencies(
-            toolCalls,
-            initialPrompt,
-            hasOpenTabsContext
-          );
-          const waitingForTabSelection =
-            toolCallsToExecute.some(
-              (toolCall) => toolCall.name === "get_open_tabs"
-            ) && this.needsTabIdDiscovery(initialPrompt);
-          const executedToolCallText =
-            this.renderExecutedToolCalls(toolCallsToExecute);
+          const executedToolCallText = this.renderExecutedToolCalls(toolCalls);
 
-          assistantMessage.tools = toolCallsToExecute.map((toolCall) => {
+          assistantMessage.tools = toolCalls.map((toolCall) => {
             const existingTool = assistantMessage.tools.find(
               ({ id }) => id === toolCall.id
             );
@@ -319,11 +286,8 @@ class Agent {
           });
 
           const toolResponses = await Promise.all(
-            toolCallsToExecute.map(this.executeToolCall)
+            toolCalls.map(this.executeToolCall)
           );
-          hasOpenTabsContext =
-            hasOpenTabsContext ||
-            toolResponses.some(({ name }) => name === "get_open_tabs");
 
           for (let i = this.messages.length - 1; i >= 0; i -= 1) {
             if (this.messages[i].role === "assistant") {
@@ -351,9 +315,8 @@ class Agent {
           }));
 
           this.chatMessages = [...prevChatMessages, assistantMessage];
-          prompt = waitingForTabSelection
-            ? "Use the open tabs result above. If the requested tab is present, call go_to_tab with its id. If it is not present, answer that it is not open. Do not invent IDs."
-            : "Use the tool results above to continue the user's request. Call another listed tool if needed; otherwise answer normally.";
+          prompt =
+            "Use the tool results above to continue the user's request. Call another listed tool if needed; otherwise answer normally.";
           roleForGeneration = "user";
           appendPromptMessage = true;
         }
@@ -495,59 +458,6 @@ class Agent {
     );
   }
 
-  private resolveToolDependencies(
-    toolCalls: ToolCallPayload[],
-    initialPrompt: string,
-    hasOpenTabsContext: boolean
-  ): ToolCallPayload[] {
-    if (
-      !toolCalls.some((toolCall) =>
-        this.requiresKnownTabId(
-          toolCall,
-          initialPrompt,
-          hasOpenTabsContext
-        )
-      )
-    ) {
-      return toolCalls;
-    }
-
-    logger.warn("Agent", "Replaced tab action with open-tabs discovery", {
-      toolNames: toolCalls.map((toolCall) => toolCall.name),
-    });
-
-    return [
-      {
-        id: JSON.stringify({ name: "get_open_tabs", arguments: {} }),
-        name: "get_open_tabs",
-        arguments: {},
-      },
-    ];
-  }
-
-  private requiresKnownTabId(
-    toolCall: ToolCallPayload,
-    initialPrompt: string,
-    hasOpenTabsContext: boolean
-  ): boolean {
-    return (
-      (toolCall.name === "go_to_tab" || toolCall.name === "close_tab") &&
-      !hasOpenTabsContext &&
-      !this.userProvidedTabId(initialPrompt)
-    );
-  }
-
-  private needsTabIdDiscovery(prompt: string): boolean {
-    return (
-      /\b(go to|switch to|close)\b/i.test(prompt) &&
-      !this.userProvidedTabId(prompt)
-    );
-  }
-
-  private userProvidedTabId(prompt: string): boolean {
-    return /\b(tab\s*(id\s*)?#?\s*\d+|tab\s+\d+)\b/i.test(prompt);
-  }
-
   private renderExecutedToolCalls(toolCalls: ToolCallPayload[]): string {
     return toolCalls
       .map(
@@ -579,18 +489,6 @@ class Agent {
       .join(",")})`;
   }
 
-  private shouldExecuteToolForPrompt(prompt: string): boolean {
-    return /\b(tab|tabs|open|close|go to|switch|browser|page|website|history|url|highlight|find|search|current site|current page)\b/i.test(
-      prompt
-    );
-  }
-
-  private fallbackDirectResponse(prompt: string): string {
-    if (/^\s*(hi|hello|hey|yo|sup)\b[!.\s]*$/i.test(prompt)) {
-      return "Hello! How can I help?";
-    }
-    return "I can answer that directly. What would you like to know?";
-  }
 }
 
 export default Agent;
