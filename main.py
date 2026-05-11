@@ -8,7 +8,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Run the Trillim backend for the browser extension."
     )
-    parser.add_argument("--model", default="Trillim/BitNet-TRNQ")
+    parser.add_argument("--model", default="Trillim/Bonsai-4BT-TRNQ")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", default=8000, type=int)
     parser.add_argument("--num-threads", default=0, type=int)

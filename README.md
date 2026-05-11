@@ -118,7 +118,7 @@ uv run python main.py
 To switch the Trillim model, pass a different store ID:
 
 ```bash
-uv run python main.py --model Trillim/BitNet-TRNQ
+uv run python main.py --model Trillim/Bonsai-4BT-TRNQ
 ```
 
 History and page search now use local lexical embeddings in the extension instead of a Transformers.js feature-extraction model. That keeps the extension free of ONNX Runtime and Transformers.js browser bundles, but semantic recall will not match MiniLM.
