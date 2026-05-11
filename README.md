@@ -1,8 +1,8 @@
-# Ternary-Bonsai Browser Assistant
+# Trillim Browser Assistant
 
 ## About this extension
 
-An on-device AI assistant that runs entirely in your browser using WebGPU and Transformers.js. This Chrome extension provides an intelligent agent that can understand natural language commands and interact with your browser through a set of specialized tools.
+An on-device AI assistant that connects to a local Trillim backend. This Chrome extension provides an intelligent agent that can understand natural language commands and interact with your browser through a set of specialized tools.
 
 All processing happens locally on your device. No data is sent to external servers, ensuring complete privacy.
 
@@ -36,8 +36,8 @@ The extension maintains a semantic search-enabled history database:
 
 #### Prerequisites
 
-- Chrome browser with WebGPU support (Chrome 113+)
-- Modern GPU with WebGPU capabilities
+- Chrome browser
+- Local Trillim backend running on `127.0.0.1:8000`
 
 #### Quick Load
 
@@ -59,14 +59,20 @@ cd gemma4-browser-extension
 2. Install dependencies:
 ```bash
 pnpm install
+uv sync
 ```
 
-3. Build the extension:
+3. Start the Trillim backend:
+```bash
+uv run python main.py
+```
+
+4. Build the extension:
 ```bash
 pnpm run build
 ```
 
-4. Load in Chrome:
+5. Load in Chrome:
    - Open `chrome://extensions/`
    - Enable "Developer mode"
    - Click "Load unpacked"
@@ -101,36 +107,40 @@ The extension requires these permissions:
 
 ---
 
-## Supported Models
+## Backend
 
-This extension supports multiple ONNX models for browser-based inference:
+The extension expects the local Trillim server at `http://127.0.0.1:8000`.
 
-### Text Generation
-- **Ternary-Bonsai-4B-ONNX**: 4B parameters, q2 ternary quantization (~2.25GB) - **Current model in use**
+```bash
+uv run python main.py
+```
 
-### Feature Extraction
-- **all-MiniLM-L6-v2-ONNX**: Used for semantic search embeddings
+To switch the Trillim model, pass a different store ID:
 
-To switch models, update `TEXT_GENERATION_ID` in `src/shared/constants.ts` and rebuild.
+```bash
+uv run python main.py --model Trillim/BitNet-TRNQ
+```
+
+History and page search now use local lexical embeddings in the extension instead of a Transformers.js feature-extraction model. That keeps the extension free of ONNX Runtime and Transformers.js browser bundles, but semantic recall will not match MiniLM.
 
 ---
 
 ## Extension Architecture
 
-This extension demonstrates an effective architecture for integrating Transformers.js into browser extensions. The design separates concerns across three key components, each optimized for specific tasks.
+This extension separates concerns across three key components, each optimized for specific tasks.
 
 ### Background Script: The AI Engine
 
-The background service worker hosts Transformers.js models as the centralized AI engine.
+The background service worker coordinates the agent and sends LLM requests to the local Trillim backend.
 
 **Why this works:**
 
-- **Persistent model loading**: Models are loaded once and shared across all tabs, side panels, and content scripts. This is crucial because loading multi-gigabyte models repeatedly would be impractical.
+- **Persistent backend loading**: The Trillim server owns model loading once, outside the extension bundle.
 - **Service worker lifetime**: Service workers can stay alive during active ML processing, which is essential for inference tasks that may take several seconds.
 - **Centralized processing**: Multiple components can send inference requests to a single background worker, enabling efficient resource sharing and coordination.
 - **Heavy workloads**: ML inference is computationally intensive. The background context is designed to handle such workloads without blocking user interactions.
 
-**What it does**: Loads models, processes inference, executes tools, handles feature extraction.
+**What it does**: Streams Trillim responses, executes tools, handles local lexical feature extraction.
 
 ### Side Panel: The User Interface
 
@@ -174,7 +184,7 @@ User Input (Side Panel)
     ↓
 Background Script (AI Agent)
     ↓
-    Processes with Transformers.js
+    Streams from local Trillim backend
     ↓
     Executes tools (e.g., ask_website)
     ↓
@@ -191,15 +201,12 @@ Content Script (if needed)
 Side Panel (displays response)
 ```
 
-### Key Advantages for Transformers.js
+### Key Advantages
 
-This architecture is particularly well-suited for browser-based ML:
-
-1. **Resource efficiency**: Models load once, inference happens centrally
+1. **Resource efficiency**: The LLM loads once in the Trillim backend
 2. **Responsive UI**: Heavy ML processing doesn't block the interface
 3. **Scalable**: Can handle requests from multiple tabs simultaneously
 4. **Secure**: Maintains browser security model while enabling powerful features
-5. **WebGPU acceleration**: Background script can leverage WebGPU for fast inference
 
 ---
 
