@@ -115,6 +115,8 @@ The extension expects the local Trillim server at `http://127.0.0.1:8000`.
 uv run python main.py
 ```
 
+Prompt and response debug logs are written to `logs/trillim-prompts.jsonl`.
+
 To switch the Trillim model, pass a different store ID:
 
 ```bash

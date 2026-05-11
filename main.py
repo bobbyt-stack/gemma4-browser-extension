@@ -1,5 +1,9 @@
 import argparse
+import json
+from datetime import UTC, datetime
+from pathlib import Path
 
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from trillim import LLM, Server
 
@@ -28,6 +32,21 @@ def main():
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    log_path = Path(__file__).resolve().parent / "logs" / "trillim-prompts.jsonl"
+
+    @server.app.post("/debug/prompt-log")
+    async def write_prompt_log(request: Request):
+        payload = await request.json()
+        entry = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            **payload,
+        }
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return {"status": "ok"}
+
     server.run(host=args.host, port=args.port)
 
 
