@@ -1,5 +1,4 @@
 import {
-  LOCAL_EMBEDDING_TITLE,
   TRILLIM_BASE_URL,
   TRILLIM_MODEL_ID,
   TRILLIM_MODEL_TITLE,
@@ -12,10 +11,7 @@ import {
   ResponseStatus,
 } from "../shared/types.ts";
 import Agent, { AgentState } from "./agent/Agent.ts";
-import {
-  createAskWebsiteTool,
-  highlightWebsiteElementTool,
-} from "./tools/askWebsite.ts";
+import { highlightWebsiteElementTool } from "./tools/askWebsite.ts";
 //import { googleSearchTool } from "./tools/search.ts";
 import {
   closeTabTool,
@@ -23,11 +19,6 @@ import {
   goToTabTool,
   openUrlTool,
 } from "./tools/tabActions.ts";
-import FeatureExtractor from "./utils/FeatureExtractor.ts";
-import VectorHistory from "./vectorHistory/VectorHistory.ts";
-
-import Tab = chrome.tabs.Tab;
-
 let lastProgress: number = 0;
 const onModelDownloadProgress = (modelId: string, percentage: number) => {
   const rounded = Math.round(percentage * 100) / 100;
@@ -51,14 +42,11 @@ logger.info("Background", "Extension initialized", {
   modelConfig: {
     modelId: TRILLIM_MODEL_ID,
     modelTitle: TRILLIM_MODEL_TITLE,
-    embeddingTitle: LOCAL_EMBEDDING_TITLE,
   },
 });
 
 logger.setAppInfo(TRILLIM_MODEL_ID, TRILLIM_MODEL_TITLE);
 
-const featureExtractor = new FeatureExtractor();
-const vectorHistory = new VectorHistory(featureExtractor);
 let currentAgent: Agent | null = null;
 
 const ACTIVE_TOOLS_STORAGE_KEY = "activeTools";
@@ -69,8 +57,6 @@ const availableTools: Record<string, () => any> = {
   [AvailableTools.GO_TO_TAB]: () => goToTabTool,
   [AvailableTools.OPEN_URL]: () => openUrlTool,
   [AvailableTools.CLOSE_TAB]: () => closeTabTool,
-  [AvailableTools.FIND_HISTORY]: () => vectorHistory.findHistoryTool,
-  [AvailableTools.ASK_WEBSITE]: () => createAskWebsiteTool(featureExtractor),
   [AvailableTools.HIGHLIGHT_WEBSITE_ELEMENT]: () => highlightWebsiteElementTool,
   //[AvailableTools.GOOGLE_SEARCH]: () => googleSearchTool,
 };
@@ -106,9 +92,7 @@ const createAgent = (toolNames?: string[], state?: AgentState): Agent => {
 
 const getStoredActiveTools = async (): Promise<string[]> => {
   const stored = await chrome.storage.local.get(ACTIVE_TOOLS_STORAGE_KEY);
-  return Array.isArray(stored[ACTIVE_TOOLS_STORAGE_KEY])
-    ? stored[ACTIVE_TOOLS_STORAGE_KEY]
-    : [];
+  return sanitizeToolNames(stored[ACTIVE_TOOLS_STORAGE_KEY]);
 };
 
 const getStoredAgentState = async (): Promise<AgentState | undefined> => {
@@ -139,6 +123,13 @@ const getAgent = async (): Promise<Agent> => {
     );
   }
   return currentAgent;
+};
+
+const sanitizeToolNames = (toolNames: unknown): string[] => {
+  if (!Array.isArray(toolNames)) return [];
+  return toolNames.filter((toolName): toolName is string =>
+    Object.prototype.hasOwnProperty.call(availableTools, toolName)
+  );
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -174,7 +165,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === BackgroundTasks.INITIALIZE_MODELS) {
     Promise.all([
       getAgent(),
-      featureExtractor.getFeatureExtractionPipeline(onModelDownloadProgress),
     ])
       .then(([agent]) =>
         agent.getTextGenerationPipeline(onModelDownloadProgress)
@@ -191,14 +181,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === BackgroundTasks.AGENT_INITIALIZE) {
-    const tools = message.tools as string[] | undefined;
+    const tools = sanitizeToolNames(message.tools);
     const statePromise = currentAgent
       ? Promise.resolve(currentAgent.getState())
       : getStoredAgentState();
 
     Promise.all([
       chrome.storage.local.set({
-        [ACTIVE_TOOLS_STORAGE_KEY]: tools ?? [],
+        [ACTIVE_TOOLS_STORAGE_KEY]: tools,
       }),
       statePromise,
     ]).then(([, state]) => {
@@ -254,25 +244,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === BackgroundTasks.EXTRACT_FEATURES) {
-    featureExtractor
-      .extractFeatures([message.text])
-      .then((result) => {
-        sendResponse({ status: ResponseStatus.SUCCESS, result: result[0] });
-      })
-      .catch((error: Error) => {
-        logger.error(
-          "Background",
-          "EXTRACT_FEATURES failed",
-          { text: message.text?.substring(0, 50) },
-          error
-        );
-        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
-      });
-
-    return true;
-  }
-
   if (message.type === "GET_DEBUG_LOGS") {
     logger.getLogs(500).then((logs) => {
       console.log("=== EXTENSION LOGS ===");
@@ -324,53 +295,4 @@ chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id) {
     await chrome.sidePanel.open({ tabId: tab.id });
   }
-});
-
-const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
-  const title = tab.title || "Untitled";
-  let description = "";
-
-  try {
-    const results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const metaDescription = document.querySelector(
-          'meta[name="description"]'
-        );
-        return metaDescription?.getAttribute("content") || "";
-      },
-    });
-    description = results[0]?.result || "";
-  } catch (error) {
-    logger.warn("Background", "Could not extract description", { tabId });
-  }
-
-  if (!description) {
-    description = tab.url || "";
-  }
-
-  // Add to vector history
-  try {
-    await vectorHistory.addEntry(title, description, tab.url);
-    logger.info("Background", "Added to vector history", {
-      title,
-      url: tab.url,
-    });
-  } catch (error) {
-    const err = error as Error;
-    logger.error(
-      "Background",
-      "Failed to add page to vector history",
-      { title },
-      err
-    );
-  }
-};
-
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.status !== "complete") return;
-  if (!tab.url?.startsWith("http")) return;
-
-  // Add page to vector history for later retrieval
-  addCurrentPageToVectorHistory(tabId, tab);
 });

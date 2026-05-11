@@ -27,14 +27,6 @@ const toolMetadata: Record<ToolName, { label: string; description: string }> = {
     label: "Close Tab",
     description: "Close a specific tab",
   },
-  [AvailableTools.FIND_HISTORY]: {
-    label: "Find History",
-    description: "Search browsing history with semantic search",
-  },
-  [AvailableTools.ASK_WEBSITE]: {
-    label: "Ask Website",
-    description: "Extract and analyze website content",
-  },
   [AvailableTools.HIGHLIGHT_WEBSITE_ELEMENT]: {
     label: "Highlight Website Element",
     description: "Highlight elements on a webpage",
