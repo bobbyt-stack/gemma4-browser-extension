@@ -3,8 +3,6 @@ export const AvailableTools = {
   GO_TO_TAB: "go_to_tab",
   OPEN_URL: "open_url",
   CLOSE_TAB: "close_tab",
-  FIND_HISTORY: "find_history",
-  ASK_WEBSITE: "ask_website",
   HIGHLIGHT_WEBSITE_ELEMENT: "highlight_website_element",
   // GOOGLE_SEARCH: "google_search", // Commented out - not implemented yet
 } as const;

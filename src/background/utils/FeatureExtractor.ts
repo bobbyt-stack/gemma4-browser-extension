@@ -1,42 +1,55 @@
-import { FeatureExtractionPipeline, pipeline } from "@huggingface/transformers";
-
-import { FEATURE_EXTRACTION_ID, MODELS } from "../../shared/constants.ts";
-
-const model = MODELS[FEATURE_EXTRACTION_ID];
-
 class FeatureExtractor {
-  private pipeline: FeatureExtractionPipeline = null;
+  private dimensions = 384;
 
   public getFeatureExtractionPipeline = async (
     onDownloadProgress: (id: string, percentage: number) => void = () => {}
-  ): Promise<FeatureExtractionPipeline> => {
-    if (this.pipeline) return this.pipeline;
-
-    try {
-      const pipe = await pipeline("feature-extraction", model.modelId, {
-        dtype: model.dtype,
-        device: "webgpu",
-        progress_callback: (i) => {
-          if (i.status === "progress_total") {
-            onDownloadProgress(model.modelId, i.progress);
-          }
-        },
-      });
-      this.pipeline = pipe as FeatureExtractionPipeline;
-      return this.pipeline;
-    } catch (error) {
-      console.error("Failed to initialize feature extraction pipeline:", error);
-      throw error;
-    }
+  ): Promise<FeatureExtractor> => {
+    onDownloadProgress("local-lexical-embeddings", 100);
+    return this;
   };
 
   public extractFeatures = async (
     input: Array<string>
   ): Promise<Array<Array<number>>> => {
-    const pipe = await this.getFeatureExtractionPipeline();
-    const result = await pipe(input, { normalize: true, pooling: "mean" });
-    return result.tolist();
+    return input.map((text) => this.embed(text));
   };
+
+  private embed(text: string): Array<number> {
+    const vector = new Array(this.dimensions).fill(0);
+    const tokens = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
+
+    for (const token of tokens) {
+      for (const feature of this.featuresForToken(token)) {
+        const hash = this.hash(feature);
+        const index = Math.abs(hash) % this.dimensions;
+        const sign = hash % 2 === 0 ? 1 : -1;
+        vector[index] += sign;
+      }
+    }
+
+    let magnitude = 0;
+    for (const value of vector) magnitude += value * value;
+    magnitude = Math.sqrt(magnitude) || 1;
+    return vector.map((value) => value / magnitude);
+  }
+
+  private featuresForToken(token: string): Array<string> {
+    const features = [token];
+    if (token.length > 4) features.push(token.slice(0, 4), token.slice(-4));
+    for (let i = 0; i < token.length - 2; i += 1) {
+      features.push(token.slice(i, i + 3));
+    }
+    return features;
+  }
+
+  private hash(value: string): number {
+    let hash = 2166136261;
+    for (let i = 0; i < value.length; i += 1) {
+      hash ^= value.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash | 0;
+  }
 }
 
 export default FeatureExtractor;

@@ -27,8 +27,6 @@ export enum ContentTasks {
   CLEAR_HIGHLIGHTS,
 }
 
-export type Dtype = "fp32" | "fp16" | "q2" | "q4" | "q4f16";
-
 export interface ChatMessageUser {
   role: "user";
   content: string;

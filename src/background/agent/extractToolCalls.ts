@@ -4,8 +4,9 @@ export const extractToolCalls = (
   text: string
 ): { toolCalls: ToolCallPayload[]; message: string } => {
   const cleanedText = text.replace(/<\|end_of_text\|>/g, "");
-  
+
   const toolCalls: ToolCallPayload[] = [];
+  const rawToolCallTexts: string[] = [];
 
   const jsonMatches = Array.from(
     cleanedText.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/g)
@@ -15,6 +16,7 @@ export const extractToolCalls = (
     try {
       const parsed = JSON.parse(match[1].trim());
       if (parsed && typeof parsed.name === "string") {
+        rawToolCallTexts.push(match[0]);
         toolCalls.push({
           name: parsed.name,
           arguments: parsed.arguments ?? {},
@@ -37,12 +39,14 @@ export const extractToolCalls = (
       const name = match[1];
       try {
         const args = JSON.parse(match[2] || "{}");
+        rawToolCallTexts.push(match[0]);
         toolCalls.push({
           name,
           arguments: args,
           id: JSON.stringify({ name, arguments: args }),
         });
       } catch {
+        rawToolCallTexts.push(match[0]);
         toolCalls.push({
           name,
           arguments: {},
@@ -52,7 +56,12 @@ export const extractToolCalls = (
     }
   }
 
-  const message = cleanedText
+  const messageWithoutRawToolCalls = rawToolCallTexts.reduce(
+    (message, rawToolCallText) => message.replace(rawToolCallText, ""),
+    cleanedText
+  );
+
+  const message = messageWithoutRawToolCalls
     .replace(/<\|end_of_text\|>/g, "")
     .replace(/<\|im_start\|>/g, "")
     .replace(/<\|im_end\|>/g, "")
@@ -60,6 +69,7 @@ export const extractToolCalls = (
     .replace(/<tool_response>|<\/tool_response>/g, "")
     .replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "")
     .replace(/<tool_call>[\s\S]*?(?:<\/tool_call>|$)/g, "")
+    .replace(/<\/tool_call>/g, "")
     .replace(/<\|tool_call\>[\s\S]*?(?:<tool_call\|>|$)/g, "")
     .trim();
 

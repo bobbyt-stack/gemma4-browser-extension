@@ -1,0 +1,9 @@
+[project]
+name = "trillim-browser-extension"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "trillim>=0.10.2",
+]

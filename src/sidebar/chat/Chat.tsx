@@ -40,7 +40,7 @@ export default function Chat() {
   const [showCommands, setShowCommands] = useState<boolean>(false);
   const [toolsOpen, setToolsOpen] = useState<boolean>(false);
 
-  const [activeTools, setActiveTools] = useState<ToolName[]>();
+  const [activeTools, setActiveTools] = useState<ToolName[]>([]);
   const [toolsLoaded, setToolsLoaded] = useState<boolean>(false);
 
   const inputValue = watch("input");
@@ -57,6 +57,10 @@ export default function Chat() {
   useEffect(() => {
     if (toolsLoaded) {
       chrome.storage.local.set({ activeTools });
+      chrome.runtime.sendMessage({
+        type: BackgroundTasks.AGENT_INITIALIZE,
+        tools: activeTools,
+      });
     }
   }, [activeTools, toolsLoaded]);
 
@@ -103,10 +107,6 @@ export default function Chat() {
         setMessages(resp.messages);
       }
     );
-
-    chrome.runtime.sendMessage({
-      type: BackgroundTasks.AGENT_CLEAR,
-    });
 
     chrome.runtime.onMessage.addListener((message) => {
       if (message.type === BackgroundMessages.MESSAGES_UPDATE) {
