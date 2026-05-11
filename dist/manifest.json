@@ -1,12 +1,17 @@
 {
   "manifest_version": 3,
-  "name": "Ternary-Bonsai Browser Assistant",
+  "name": "Trillim Browser Assistant",
   "version": "0.2.1",
-  "description": "On-device AI Browser Assistant powered by Transformers.js and Ternary-Bonsai",
+  "description": "On-device AI Browser Assistant powered by Trillim",
   "permissions": ["sidePanel", "storage", "scripting", "tabs", "downloads"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "host_permissions": [
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*",
+    "http://*/*",
+    "https://*/*"
+  ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://127.0.0.1:8000 http://localhost:8000"
   },
   "background": {
     "service_worker": "background.js",
