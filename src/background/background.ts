@@ -1,13 +1,16 @@
-import { ModelRegistry } from "@huggingface/transformers";
-
-import { MODELS, REQUIRED_MODEL_IDS, TEXT_GENERATION_ID } from "../shared/constants.ts";
+import {
+  LOCAL_EMBEDDING_TITLE,
+  TRILLIM_BASE_URL,
+  TRILLIM_MODEL_ID,
+  TRILLIM_MODEL_TITLE,
+} from "../shared/constants.ts";
+import { logger } from "../shared/logger.ts";
 import { AvailableTools } from "../shared/tools.ts";
 import {
   BackgroundMessages,
   BackgroundTasks,
   ResponseStatus,
 } from "../shared/types.ts";
-import { logger } from "../shared/logger.ts";
 import Agent from "./agent/Agent.ts";
 import {
   createAskWebsiteTool,
@@ -31,7 +34,9 @@ const onModelDownloadProgress = (modelId: string, percentage: number) => {
   if (rounded === lastProgress) return;
   lastProgress = rounded;
 
-  logger.debug("Background", `Model download progress: ${modelId}`, { percentage: rounded });
+  logger.debug("Background", `Model download progress: ${modelId}`, {
+    percentage: rounded,
+  });
 
   chrome.runtime.sendMessage({
     type: BackgroundMessages.DOWNLOAD_PROGRESS,
@@ -42,14 +47,15 @@ const onModelDownloadProgress = (modelId: string, percentage: number) => {
 
 logger.info("Background", "Extension initialized", {
   version: chrome.runtime.getManifest().version,
-  models: REQUIRED_MODEL_IDS,
+  backend: TRILLIM_BASE_URL,
   modelConfig: {
-    modelId: MODELS[TEXT_GENERATION_ID].modelId,
-    modelTitle: MODELS[TEXT_GENERATION_ID].title,
+    modelId: TRILLIM_MODEL_ID,
+    modelTitle: TRILLIM_MODEL_TITLE,
+    embeddingTitle: LOCAL_EMBEDDING_TITLE,
   },
 });
 
-logger.setAppInfo(MODELS[TEXT_GENERATION_ID].modelId, MODELS[TEXT_GENERATION_ID].title);
+logger.setAppInfo(TRILLIM_MODEL_ID, TRILLIM_MODEL_TITLE);
 
 const featureExtractor = new FeatureExtractor();
 const vectorHistory = new VectorHistory(featureExtractor);
@@ -99,45 +105,30 @@ const getAgent = (): Agent => {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   logger.debug("Background", "Message received", { type: message.type });
-  
+
   if (message.type === BackgroundTasks.CHECK_MODELS) {
-    Promise.all(
-      REQUIRED_MODEL_IDS.map(async (modelId) => {
-        const model = Object.values(MODELS).find((m) => m.modelId === modelId);
-        const files = await ModelRegistry.get_pipeline_files(
-          model.task,
-          modelId,
-          {
-            dtype: model.dtype,
-          }
-        );
-        const metas = await Promise.all(
-          files.map((file) => ModelRegistry.get_file_metadata(modelId, file))
-        );
-        const downloadSize = metas.reduce(
-          (total, item) => total + (item.size ?? 0),
-          0
-        );
-        const isCached = await ModelRegistry.is_pipeline_cached(
-          model.task,
-          modelId,
-          {
-            dtype: model.dtype,
-          }
-        );
-        return {
-          size: downloadSize,
-          cached: isCached,
-          modelId,
-        };
-      })
-    )
-      .then((results) => {
-        sendResponse({ status: ResponseStatus.SUCCESS, results });
+    fetch(`${TRILLIM_BASE_URL}/healthz`)
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Trillim backend returned HTTP ${response.status}`);
+        }
+        sendResponse({
+          status: ResponseStatus.SUCCESS,
+          results: [
+            {
+              size: 0,
+              cached: true,
+              modelId: TRILLIM_MODEL_ID,
+            },
+          ],
+        });
       })
       .catch((error: Error) => {
         logger.error("Background", "CHECK_MODELS failed", null, error);
-        sendResponse({ status: ResponseStatus.ERROR, error: error.message });
+        sendResponse({
+          status: ResponseStatus.ERROR,
+          error: `Trillim backend is not reachable at ${TRILLIM_BASE_URL}. Start it with \`uv run python main.py\`. ${error.message}`,
+        });
       });
     return true;
   }
@@ -172,7 +163,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
   if (message.type === BackgroundTasks.AGENT_GENERATE_TEXT) {
     const agent = getAgent();
-    logger.info("Background", "AGENT_GENERATE_TEXT", { prompt: message.prompt?.substring(0, 50) });
+    logger.info("Background", "AGENT_GENERATE_TEXT", {
+      prompt: message.prompt?.substring(0, 50),
+    });
     agent
       .runAgent(message.prompt)
       .then((metrics) => {
@@ -210,7 +203,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ status: ResponseStatus.SUCCESS, result: result[0] });
       })
       .catch((error: Error) => {
-        logger.error("Background", "EXTRACT_FEATURES failed", { text: message.text?.substring(0, 50) }, error);
+        logger.error(
+          "Background",
+          "EXTRACT_FEATURES failed",
+          { text: message.text?.substring(0, 50) },
+          error
+        );
         sendResponse({ status: ResponseStatus.ERROR, error: error.message });
       });
 
@@ -221,7 +219,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     logger.getLogs(500).then((logs) => {
       console.log("=== EXTENSION LOGS ===");
       logs.forEach((log) => {
-        console.log(`[${new Date(log.timestamp).toISOString()}] [${log.source}] ${log.message}`, log.data);
+        console.log(
+          `[${new Date(log.timestamp).toISOString()}] [${log.source}] ${log.message}`,
+          log.data
+        );
       });
       sendResponse({ status: ResponseStatus.SUCCESS, logs });
     });
@@ -233,14 +234,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       try {
         const blob = new Blob([logsJson], { type: "application/json" });
         const url = URL.createObjectURL(blob);
-        
+
         // Use chrome.downloads API to save file
         await chrome.downloads.download({
           url: url,
           filename: `extension-logs-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
           saveAs: true,
         });
-        
+
         logger.info("Background", "Logs exported to downloads folder");
       } catch (err) {
         logger.error("Background", "Failed to export logs", null, err as Error);
@@ -293,10 +294,18 @@ const addCurrentPageToVectorHistory = async (tabId: number, tab: Tab) => {
   // Add to vector history
   try {
     await vectorHistory.addEntry(title, description, tab.url);
-    logger.info("Background", "Added to vector history", { title, url: tab.url });
+    logger.info("Background", "Added to vector history", {
+      title,
+      url: tab.url,
+    });
   } catch (error) {
     const err = error as Error;
-    logger.error("Background", "Failed to add page to vector history", { title }, err);
+    logger.error(
+      "Background",
+      "Failed to add page to vector history",
+      { title },
+      err
+    );
   }
 };
 
