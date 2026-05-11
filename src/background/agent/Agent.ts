@@ -353,7 +353,7 @@ class Agent {
           this.chatMessages = [...prevChatMessages, assistantMessage];
           prompt = waitingForTabSelection
             ? "Use the open tabs result above. If the requested tab is present, call go_to_tab with its id. If it is not present, answer that it is not open. Do not invent IDs."
-            : "Based on the tool results above, provide your FINAL answer to the user's question. Do NOT call any more tools.";
+            : "Use the tool results above to continue the user's request. Call another listed tool if needed; otherwise answer normally.";
           roleForGeneration = "user";
           appendPromptMessage = true;
         }
