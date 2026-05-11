@@ -75,7 +75,7 @@ const availableTools: Record<string, () => any> = {
 const createAgent = (toolNames?: string[]): Agent => {
   const agent = new Agent();
 
-  const toolsToRegister = toolNames || Object.keys(availableTools);
+  const toolsToRegister = toolNames ?? [];
 
   for (const toolName of toolsToRegister) {
     const toolFactory = availableTools[toolName];
